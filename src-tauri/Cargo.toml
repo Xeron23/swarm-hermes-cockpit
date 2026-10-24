@@ -1,0 +1,18 @@
+[package]
+name = "hermes-cockpit"
+version = "0.1.0"
+description = "Hermes multi-agent mission control demo"
+edition = "2021"
+rust-version = "1.90"
+
+[lib]
+name = "hermes_cockpit_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-clipboard-manager = "2"
+serde = { version = "1", features = ["derive"] }

@@ -1,0 +1,35 @@
+{
+  "name": "hermes-cockpit-tauri",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Hermes multi-agent mission control \u2014 Tauri v2 demo application",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "web:dev": "vite",
+    "web:build": "vite build",
+    "web:preview": "vite preview",
+    "check": "node scripts/check.mjs",
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "build:debug": "tauri build --debug",
+    "android:init": "tauri android init",
+    "android:dev": "tauri android dev",
+    "android:build": "tauri android build --apk",
+    "android:build:debug": "tauri android build --debug --apk",
+    "icons": "tauri icon src-tauri/icons/source.png --output src-tauri/icons",
+    "test": "node scripts/test-native.mjs"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.12.4",
+    "@tauri-apps/plugin-clipboard-manager": "2.5.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.4",
+    "vite": "8.3.5",
+    "ajv": "8.17.1"
+  }
+}
