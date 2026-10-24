@@ -15,14 +15,14 @@
       {
         "label": "main",
         "title": "Hermes Cockpit",
-        "width": 430,
-        "height": 900,
-        "minWidth": 320,
-        "minHeight": 568,
+        "width": 1360,
+        "height": 860,
+        "minWidth": 960,
+        "minHeight": 640,
         "resizable": true,
         "center": true,
-        "backgroundColor": "#FFB6A6",
-        "theme": "Light"
+        "backgroundColor": "#192e38",
+        "theme": "Dark"
       }
     ],
     "security": {
