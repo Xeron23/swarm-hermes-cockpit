@@ -12,6 +12,7 @@ permissions:
 jobs:
   build-windows:
     name: Build Windows Desktop (x86_64)
+    if: false
     runs-on: windows-latest
     steps:
       - name: Checkout repository
@@ -81,8 +82,8 @@ jobs:
         env:
           NDK_HOME: ${{ env.NDK_HOME }}
         run: |
-          npx tauri android init
-          npx tauri android build --apk --debug
+          npx tauri android init --ci
+          npx tauri android build --apk --debug --target aarch64
 
       - name: Upload APK to Release
         uses: softprops/action-gh-release@v2
