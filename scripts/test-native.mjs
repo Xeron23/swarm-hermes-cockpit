@@ -29,6 +29,31 @@ assert.equal(nativeCalls[0].args.text, 'native payload');
 assert.equal((await window.HermesNative.getRuntimeInfo()).platform, 'android');
 assert.equal(webWrites.length, 1, 'Native mode must not use the browser clipboard fallback.');
 assert.ok(nativeCalls.every(c => !c.command.includes('read_text')), 'No clipboard reads are needed.');
+
+// Native telemetry must receive replay frames sent before connect resolves.
+const { openSocket } = await import('../src/transport.js');
+let channel;
+const sends = [];
+mockIPC((command, args) => {
+  if (command === 'plugin:websocket|connect') {
+    assert.equal(args.url, 'ws://192.168.1.4:3450/ws/telemetry?ticket=fixture');
+    assert.deepEqual(args.config.headers, [['Sec-WebSocket-Protocol', 'hermes.telemetry.v1']]);
+    channel = args.onMessage;
+    channel.onmessage({ type: 'Text', data: 'early replay' });
+    return 17;
+  }
+  if (command === 'plugin:websocket|send') { sends.push(args); return null; }
+  throw new Error(`Unexpected native command: ${command}`);
+});
+const received = [];
+const socket = await openSocket('ws://192.168.1.4:3450/ws/telemetry?ticket=fixture', 'hermes.telemetry.v1', { message: text => received.push(text), close() {} });
+assert.deepEqual(received, ['early replay']);
+channel.onmessage(null);
+await socket.send('ping');
+assert.deepEqual(sends[0], { id: 17, message: { type: 'Text', data: 'ping' } });
+await socket.close();
+channel.onmessage({ type: 'Text', data: 'stale replay' });
+assert.deepEqual(received, ['early replay']);
 clearMocks();
 delete globalThis.isTauri;
-console.log('PASS: browser clipboard fallback, native clipboard routing, and runtime-info IPC (mocked)');
+console.log('PASS: clipboard/runtime IPC and native WebSocket subprotocol, early replay, ping, close (mocked)');

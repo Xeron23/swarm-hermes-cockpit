@@ -3,7 +3,7 @@
   "version": "0.1.1",
   "private": true,
   "type": "module",
-  "description": "Hermes multi-agent mission control \u2014 Tauri v2 demo application",
+  "description": "Hermes mission control client for Windows and Android",
   "engines": {
     "node": ">=22.12.0"
   },
@@ -21,15 +21,17 @@
     "android:build": "tauri android build --apk",
     "android:build:debug": "tauri android build --debug --apk",
     "icons": "tauri icon src-tauri/icons/source.png --output src-tauri/icons",
-    "test": "node scripts/test-native.mjs"
+    "test": "node --test scripts/*.test.mjs && node scripts/test-native.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.4",
-    "@tauri-apps/plugin-clipboard-manager": "2.5.0"
+    "@tauri-apps/plugin-clipboard-manager": "2.5.0",
+    "@tauri-apps/plugin-http": "2.8.3",
+    "@tauri-apps/plugin-websocket": "2.5.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.12.4",
-    "vite": "8.3.5",
-    "ajv": "8.17.1"
+    "ajv": "8.17.1",
+    "vite": "8.3.5"
   }
 }

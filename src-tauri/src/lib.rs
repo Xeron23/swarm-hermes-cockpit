@@ -12,7 +12,7 @@ fn runtime_info() -> RuntimeInfo {
         app: "Hermes Cockpit",
         version: env!("CARGO_PKG_VERSION"),
         platform: std::env::consts::OS,
-        mode: "demo",
+        mode: "live",
     }
 }
 
@@ -20,6 +20,8 @@ fn runtime_info() -> RuntimeInfo {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_http::init())
+        .plugin(tauri_plugin_websocket::init())
         .invoke_handler(tauri::generate_handler![runtime_info])
         .run(tauri::generate_context!())
         .expect("Hermes Cockpit could not start");

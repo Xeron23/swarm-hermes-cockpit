@@ -5,7 +5,7 @@ button{touch-action:manipulation}
 .primary-button:active,.secondary-button:active,.icon-button:active,.send-button:active,.route-option:active{transform:scale(.96)}
 .node-card,.agent-card,.mission-card,.fleet-row{transition:border-color .22s,background-color .22s,box-shadow .22s,transform .22s var(--motion-ease)}
 @media(hover:hover){.node-card:hover,.agent-card:hover{transform:translateY(-3px);box-shadow:0 12px 28px #0002}.mission-card:hover{border-color:#9bcec165;box-shadow:0 12px 40px #14273128}.fleet-row:hover{transform:translateX(3px)}}
-.touch-ripple{position:absolute;pointer-events:none;border-radius:50%;background:currentColor;opacity:0;animation:touch-ripple .55s var(--motion-ease) forwards;z-index:2}
+.touch-ripple,.filter-chip>.touch-ripple{position:absolute;pointer-events:none;border-radius:50%;background:currentColor;opacity:0;animation:touch-ripple .55s var(--motion-ease) forwards;z-index:2}
 @keyframes touch-ripple{from{transform:scale(0);opacity:.16}to{transform:scale(1);opacity:0}}
 .metric-track>i,.segmented-progress span{transform-origin:left center;transition:width .7s var(--motion-ease),background-color .3s}
 .constellation path[stroke-dasharray]{animation:signal-flow 16s linear infinite}

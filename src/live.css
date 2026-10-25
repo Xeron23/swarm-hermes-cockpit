@@ -1,0 +1,27 @@
+.connection-banner{display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:17px;border:1px solid var(--line);background:var(--brand-secondary);border-radius:14px;margin-bottom:24px}
+.connection-banner>span{flex:1;min-width:180px;font-size:12px}
+.stale-note{padding:10px 0;color:var(--muted);font-size:12px}
+.live-dashboard{margin-top:26px}
+.live-mission{display:block;width:100%;min-height:0;margin-bottom:16px;cursor:default}
+.live-mission h2{max-width:100%;font-size:23px;overflow-wrap:anywhere}
+.live-mission:after{pointer-events:none}
+.live-mission progress{width:100%;margin:10px 0;accent-color:var(--green-ink)}
+.live-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+.signal-note{font-size:12px;padding:10px 0;color:var(--muted)}
+.node-card small{display:block;margin-top:12px;font-size:10px}
+.connection-details{display:grid;grid-template-columns:minmax(90px,1fr) minmax(0,2fr);gap:12px;font-size:12px}
+.connection-details dt{color:var(--muted)}
+.connection-details dd{margin:0;overflow-wrap:anywhere}
+.sheet-body pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.6 var(--mono);padding:15px;border-radius:12px;background:var(--cream-light);max-height:50vh;overflow:auto}
+.sheet-body>p{margin:14px 0}
+.sheet-body select{width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--cream-light);color:var(--text)}
+.sheet-footer{flex-wrap:wrap;gap:8px}
+.interaction-card{border:1px solid var(--line);padding:14px;border-radius:12px;margin:12px 0;overflow-wrap:anywhere}
+.action-error{margin:16px 0;overflow-wrap:anywhere}
+.agent-card h3{margin-top:14px}
+.chat-messages .empty-state{margin:auto}
+.chat-header>.secondary-button{padding:8px 10px;font-size:11px}
+.message-content{min-width:0}
+.bubble{white-space:pre-wrap;overflow-wrap:anywhere}
+.filter-chip>.touch-ripple{position:absolute}
+@media(max-width:900px){.connection-banner{padding:13px;margin-bottom:18px}.connection-details{grid-template-columns:1fr}.connection-details dd{margin-bottom:8px}.top-actions{gap:6px}.top-actions .demo-tag{max-width:130px;white-space:normal}.topbar .mobile-brand .brand-sub{display:none}.live-dashboard{gap:22px}.chat-layout{height:calc(var(--viewport-height,100dvh) - 12px)}.chat-mode .connection-banner,.chat-mode .action-error{margin:0 0 8px}.swarm-filters{flex-wrap:wrap}}

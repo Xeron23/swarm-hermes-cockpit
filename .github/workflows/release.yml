@@ -32,6 +32,9 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Validate client
+        run: npm run check && npm test
+
       - name: Build Frontend Web
         run: npm run web:build
 
@@ -92,6 +95,9 @@ jobs:
 
       - name: Install frontend dependencies
         run: npm ci
+
+      - name: Validate client
+        run: npm run check && npm test
 
       - name: Initialize and Build Android APK
         env:

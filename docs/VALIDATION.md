@@ -1,37 +1,25 @@
-# Hasil verifikasi
+# Validasi client data nyata
 
-Tanggal ekspor: 24 Oktober 2026. Source UI mengikuti commit yang dicatat di `SOURCE_PROVENANCE.json`.
+Validasi perubahan dilakukan pada 25 Oktober 2026. Kontrak backend berasal dari spesifikasi v1.0.0 yang diberikan pengguna; fixture integrasi adalah data uji terkontrol, bukan pengukuran VPS/PC pengguna.
 
 | Pemeriksaan | Hasil |
 | --- | --- |
-| Instalasi dependency npm | Lolos; lockfile memakai registry publik npm |
-| Tauri CLI | 2.12.4 berhasil dijalankan |
-| API JavaScript Tauri | 2.12.4 |
-| Clipboard JavaScript | 2.5.0 |
-| Vite | 8.3.5 |
-| `npm run check` | Lolos: schema konfigurasi Tauri, merge Android/Windows, aset, sintaks JS, capability, versi |
-| `npm test` | Lolos: fallback clipboard browser dan routing native/runtime-info melalui IPC mock resmi |
-| `npm run web:build` | Lolos: bundle produksi berhasil dibuat |
-| Ikon aplikasi | Dihasilkan melalui Tauri CLI; format PNG, ICO, ICNS, Android, dan iOS |
-| Smoke test bundle produksi di browser | Lolos: Overview, Swarm, filter, demo event, trace, dan payload |
-| Error konsol dari aplikasi pada smoke test | Tidak ditemukan |
-| Dependency opsional Windows/macOS di lockfile | Tersedia |
-| Kompilasi Rust desktop | Belum dijalankan; Rust/cargo tidak tersedia pada lingkungan ekspor |
-| Generate/build Android | Belum dijalankan; Android SDK/NDK belum dikonfigurasi pada lingkungan ekspor |
-| Clipboard pada perangkat native nyata | Belum diuji; pengujian native menggunakan mock |
-| Signing / instalasi APK atau desktop installer | Belum dijalankan |
+| `npm test` | 16 tes client lulus, ditambah tes boundary clipboard/runtime dan WebSocket native (subprotokol, replay awal, ping, close) dengan mock resmi Tauri |
+| `npm run check` | Lulus: schema konfigurasi base/Windows/Android, aset, sintaks JS, versi, dan scope HTTP native |
+| `npm run web:build` | Lulus; bundle memasukkan transport HTTP/WebSocket native secara dinamis |
+| Browser development, viewport desktop | Lulus terhadap fixture kontrak |
+| Browser development, viewport Android/touch | Lulus terhadap fixture kontrak, dengan motion normal |
+| Browser production preview, viewport desktop dan Android/touch | Lulus terhadap fixture kontrak |
+| Native Linux debug tanpa installer | Lulus: Rust, Tauri, plugin HTTP dan WebSocket native; dependency tercatat di Cargo.lock |
+| Backend LAN pengguna | Tidak berhasil dijangkau dari cloud; proxy membalas `403 Domain forbidden` |
+| GUI/WebView native Linux di cloud | Belum dapat dijalankan: path helper WebKit berada pada direktori sistem read-only; namespace bind mount juga tidak tersedia |
+| Binary/installer Windows | Belum dibangun atau dijalankan pada Windows asli |
+| APK Android | Belum dibangun atau diuji pada Android asli; SDK/NDK tidak disiapkan untuk tugas ini |
+| Rute LAN versus subnet Tailscale asli | Belum diverifikasi dari Windows/Android pengguna |
+| Metrik hardware pengguna | Belum tersedia menurut backend yang dijelaskan pengguna; worker PC offline, collector hardware server belum ada |
 
-`dist/` berisi build frontend produksi yang sudah dibuat. APK, EXE, MSI, DMG, AppImage, dan executable native tidak disertakan. Folder Gradle Android dibuat oleh `npm run android:init` di komputer dengan toolchain yang sesuai.
+Tes unit memeriksa scope endpoint, Base32 pairing, rotasi refresh bersamaan, respons refresh hilang, token reuse/revocation, logout saat refresh berjalan, mutasi tanpa retry buta, error typed approval, sequence besar, deduplikasi/reconnect, snapshot workspace yang salah, metrik null, serta rekonsiliasi delta/final message.
 
-Pengujian di browser memeriksa kode frontend yang sudah dibundel; hasil itu tidak menggantikan pengujian WebView native pada perangkat sasaran.
+Tes integrasi browser memeriksa keadaan belum dipasangkan tanpa node/mission contoh, pairing, snapshot, PC offline, metrik null, filter sentuh, session/chat streaming, mission backend dengan target auto, escaping payload, traces/log, pembaruan metrik dari event, serta keadaan terputus/data lama. Tes juga menolak approval ketika request hash berubah setelah dialog dibuka, lalu memverifikasi keputusan untuk hash yang benar-benar ditinjau.
 
-## Ulangi pemeriksaan
-
-```bash
-npm ci
-npm run check
-npm test
-npm run web:build
-```
-
-Setelah prasyarat native tersedia, lanjutkan dengan `npm run dev`, `npm run build`, atau langkah Android pada README.
+Tidak ada perintah power yang dikirim ke VPS/PC pengguna oleh tes. Kondisi online/angka fixture bukan klaim bahwa worker atau collector pengguna telah berjalan. Pengujian native dan jaringan asli diperlukan sebelum menyatakan deployment Windows/Android selesai.

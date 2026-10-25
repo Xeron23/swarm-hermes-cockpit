@@ -1,7 +1,7 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 
-/** Narrow native boundary; orchestration and device actions remain demo data. */
+/** Native OS boundary. Workspace and node data come from the backend. */
 window.HermesNative = Object.freeze({
   isNative: isTauri(),
   async copyText(text) {
@@ -12,6 +12,6 @@ window.HermesNative = Object.freeze({
   },
   async getRuntimeInfo() {
     if (isTauri()) return invoke('runtime_info');
-    return { app: 'Hermes Cockpit', version: '0.1.0', platform: 'browser', mode: 'demo' };
+    return { app: 'Hermes Cockpit', version: '0.1.1', platform: 'browser', mode: 'live' };
   }
 });

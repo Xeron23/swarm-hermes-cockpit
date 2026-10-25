@@ -29,7 +29,10 @@ assert.ok(base.app.security.csp.includes("script-src 'self'"));
 assert.ok(!base.app.security.csp.includes('unsafe-eval'));
 const capabilities = await json('src-tauri/capabilities/default.json');
 assert.deepEqual(capabilities.windows, ['main']);
-assert.deepEqual(capabilities.permissions, ['core:default', 'clipboard-manager:allow-write-text']);
+assert.ok(capabilities.permissions.includes('core:default'));
+assert.ok(capabilities.permissions.includes('clipboard-manager:allow-write-text'));
+assert.ok(capabilities.permissions.includes('websocket:default'));
+assert.deepEqual(capabilities.permissions.find(p => p.identifier === 'http:default').allow, [{ url: 'http://192.168.1.4:3450/**' }]);
 
 for (const filename of base.bundle.icon) await access(path.join(root, 'src-tauri', filename));
 for (const filename of await readdir(path.join(root, 'src'))) {

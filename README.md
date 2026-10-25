@@ -1,141 +1,85 @@
-# Hermes Cockpit — Tauri v2
+# Hermes Cockpit — Windows & Android
 
-Source aplikasi dari desain Hermes terbaru: peach sebagai warna utama, krem sebagai warna kedua, filter Swarm yang muat di layar kecil, navigasi aktif yang jelas, animasi, dan modal yang dapat ditarik ke bawah.
+Client Tauri v2 untuk backend Hermes Cockpit spec v1. Workspace, agen, node, misi, pesan, event, serta log berasal dari backend. Tidak ada data demo, jawaban agen simulasi, atau metrik hardware bawaan. Perangkat yang belum dipasangkan menampilkan workspace kosong.
 
-**Status:** aplikasi berjalan dalam **mode demo**. UI dan interaksinya sudah dikemas untuk Tauri v2; chat agen, telemetry, dispatch task, SSH, dan kontrol daya masih menggunakan simulasi. Backend Hermes/FastAPI tidak termasuk dalam paket ini. ZIP ini berisi source dan build frontend, bukan APK atau installer yang sudah dikompilasi.
+## Jaringan deployment ini
 
-## Yang tersedia
+| Perangkat | LAN | Tailscale |
+| --- | --- | --- |
+| VM server Hermes | `192.168.1.4` | Melalui subnet router Proxmox |
+| PC Windows, node `pc` | `192.168.1.26` | `100.122.253.126` |
+| Proxmox, subnet router | — | `100.114.42.71` |
 
-- Overview, Agents, Swarm, Nodes, dan workspace chat terpisah.
-- Misi, milestone, pemilihan VPS/PC, event feed, trace, task tree, payload, dan token inspector.
-- Modal dengan gesture turun, scroll isi terpisah, dan tombol aksi tetap terlihat.
-- Clipboard native untuk tombol salin payload melalui plugin resmi Tauri.
-- Penyimpanan riwayat demo di localStorage WebView pada perangkat.
-- Kerangka Rust, konfigurasi Tauri v2, capability minimal, ikon desktop/Android, dan npm lockfile.
-- Build frontend lokal di `dist/`; aplikasi native memuat aset ini, bukan URL hosting prototype.
+API dan WebSocket client selalu menuju VM: `http://192.168.1.4:3450` dan `ws://192.168.1.4:3450/ws/telemetry`. Di LAN gunakan rute lokal; di luar LAN aktifkan Tailscale pada client dan pastikan subnet route menuju VM disetujui dan diterima client. OS menentukan rute yang dipakai. Alamat Tailscale Proxmox bukan alamat API VM dan aplikasi tidak mengalihkan permintaan ke port 3450 pada host Proxmox.
 
-## Persiapan
+Antarmuka menunjukkan status koneksi aktual, bukan menebak apakah paket melewati LAN atau Tailscale. Prioritas rute dan kasus jaringan lain dengan subnet yang tumpang tindih harus diperiksa pada perangkat asli. Cockpit tidak menginstal VPN atau mengubah tabel routing Windows/Android.
 
-1. Instal **Node.js 22.12+** (disarankan Node LTS terbaru) beserta npm.
-2. Instal Rust stable melalui rustup. Proyek meminta minimal Rust 1.90.
-3. Pasang dependency platform sesuai [panduan resmi Tauri](https://v2.tauri.app/start/prerequisites/).
-4. Ekstrak ZIP, lalu buka terminal di folder `hermes-tauri-v2` yang berisi `package.json`.
+Windows dan Android merupakan client untuk workspace yang sama. Menjalankan Cockpit pada PC `192.168.1.26` tidak membuat node duplikat; menjalankannya pada Windows lain tidak mendaftarkan worker baru. Bridge mTLS port `8795` dipakai worker/backend, bukan client aplikasi.
 
-Dependency npm dan Cargo perlu diunduh saat setup/build pertama. Folder `node_modules` dan cache Cargo tidak disertakan.
+## Data hardware saat ini
 
-## Lihat UI tanpa compiler native
+Menurut konfigurasi backend yang diberikan pengguna, node `pc` sudah terdaftar tetapi worker belum terhubung. Kedua node saat ini melaporkan `metrics: null` dan `metrics_stale: true`. UI menampilkan **Belum ada metrik** dan status node dari backend. Nilai null tidak diubah menjadi nol atau angka contoh. Field metrik yang kelak dilaporkan ditampilkan dengan nama/unit yang diberikan backend.
+
+Worker Windows menggunakan service `hermes-node` dan perintah:
+
+```powershell
+hermes-node.exe serve --config "C:\ProgramData\hermes-node\node.yaml"
+```
+
+Binary worker, sertifikat mTLS, file konfigurasi, desktop helper, serta collector hardware server berada di luar repository client ini. Jalankan worker dengan konfigurasi yang sudah diterbitkan backend. Tidak ada konfigurasi sertifikat atau kredensial contoh yang dibuat aplikasi.
+
+## Pengembangan
+
+Gunakan Node >=22.12, npm, Rust stable >=1.90, serta prasyarat platform [Tauri](https://v2.tauri.app/start/prerequisites/). Windows membutuhkan C++ Build Tools dan WebView2. Android membutuhkan JDK, SDK, NDK, serta target Rust Android.
 
 ```bash
 npm ci
 npm run check
 npm test
-npm run web:dev
-```
-
-Buka `http://localhost:1420`. Ini hanya preview web, sehingga clipboard memakai API browser. Untuk membuat ulang aset frontend:
-
-```bash
 npm run web:build
-npm run web:preview
 ```
 
-Jangan membuka `dist/index.html` langsung melalui `file://`; gunakan server preview atau aplikasi Tauri.
-
-## Desktop: Windows, Linux, macOS
-
-Setelah persiapan platform selesai:
+Untuk client native:
 
 ```bash
-npm ci
 npm run dev
 ```
 
-Tauri menjalankan Vite dan mengompilasi Rust. Jendela awal berukuran 430 × 900 dan dapat diperbesar untuk menggunakan layout desktop.
+Untuk tampilan web development: `npm run web:dev`. Browser memakai fetch/WebSocket browser dan memerlukan CORS serta izin jaringan lokal yang sesuai. Tauri Windows/Android memakai plugin HTTP dan WebSocket native, sehingga permintaan backend tidak bergantung pada izin koneksi eksternal WebView. HTTP native dibatasi ke alamat VM di capability; verifikasi TLS tidak dimatikan. API deployment saat ini masih HTTP, bukan HTTPS.
 
-Untuk build distribusi:
+## Pairing dan penggunaan
+
+1. Pastikan perangkat bisa menjangkau API VM melalui LAN atau subnet Tailscale.
+2. Buka **Server & jaringan**, masukkan kode pairing Base32 sekali pakai (26 karakter A–Z/2–7), lalu beri nama perangkat.
+3. Tunggu snapshot workspace dan WebSocket berhasil terhubung. Token tersimpan saja tidak membuat status menjadi Terhubung.
+4. Lihat Nodes untuk status dan metrik; buka Agents untuk session chat; buat misi dari Overview. Target `auto` diserahkan ke scheduler backend.
+5. Event asli muncul di Swarm selama sesi koneksi. Event dengan task ID dapat membuka traces dan log backend. Persetujuan dan pertanyaan ada pada tombol lonceng.
+
+Refresh token berotasi secara bersama untuk permintaan bersamaan. Jika hasil POST refresh hilang karena koneksi putus, token lama tidak dikirim ulang otomatis; pairing ulang diperlukan. Kredensial disimpan dalam penyimpanan lokal WebView per endpoint. Penyimpanan ini belum memakai Windows Credential Manager atau Android Keystore; gunakan perangkat tepercaya. Cache dan token demo versi lama tidak dimigrasikan otomatis.
+
+Saat offline, snapshot yang sudah diterima diberi label data lama dan aksi dinonaktifkan. POST tugas/aksi tidak diulang otomatis setelah kegagalan jaringan. Periksa keadaan backend sebelum mengirim ulang permintaan yang hasilnya belum diketahui. Perintah daya memerlukan konfirmasi, kemudian mengikuti otorisasi dan typed approval backend; UI menunggu laporan worker untuk mengubah status. Wake tidak dibuat-buat: kontrak yang tersedia belum menyediakan endpoint wake client.
+
+## Build
 
 ```bash
+# Desktop pada OS target
 npm run build
-```
 
-Hasil bundle berada di bawah `src-tauri/target/release/bundle/`. Di Windows, konfigurasi platform memilih installer NSIS. Build installer Windows di Windows, dan bundle macOS di macOS. Linux membutuhkan dependency WebKitGTK dari panduan resmi.
-
-Windows memerlukan Microsoft C++ Build Tools dan WebView2. macOS memerlukan toolchain Xcode. Gunakan browser/WebView yang mutakhir untuk animasi dan fitur layout mobile.
-
-## Android
-
-Instal Android Studio beserta SDK Platform, Platform-Tools, Build-Tools, Command-line Tools, dan NDK melalui SDK Manager. Set `JAVA_HOME`, `ANDROID_HOME`, dan `NDK_HOME` sesuai lokasi instalasi Anda, lalu restart terminal.
-
-Tambahkan target Rust Android:
-
-```bash
-rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
-```
-
-Kemudian:
-
-```bash
-npm ci
+# Android; setelah SDK/NDK dan target Rust siap
 npm run android:init
-npm run android:dev
-```
-
-`android:init` menghasilkan proyek Gradle di `src-tauri/gen/android/` menggunakan SDK/NDK komputer Anda. Folder hasil generate tersebut belum disertakan. Untuk development, siapkan emulator atau perangkat dengan USB debugging. CLI akan memilih perangkat yang tersedia.
-
-Build APK debug untuk pengujian:
-
-```bash
-npm run android:build:debug
-```
-
-Untuk membangun satu arsitektur lebih cepat, misalnya perangkat ARM64:
-
-```bash
 npm run android:build:debug -- --target aarch64
 ```
 
-Output APK berada di bawah `src-tauri/gen/android/app/build/outputs/apk/`.
+`package-lock.json` dan `src-tauri/Cargo.lock` mengunci dependency client. Build Windows dilakukan di Windows; APK memerlukan toolchain Android. Installer dan APK baru belum dibuat atau diuji pada perangkat asli di cloud ini. Workflow release menjalankan pemeriksaan frontend sebelum build.
 
-Untuk release:
+## Pengujian integrasi browser
+
+Dengan Python Playwright dan Chromium terpasang, jalankan Vite atau production preview, lalu:
 
 ```bash
-npm run android:build
+python3 scripts/smoke-live.py http://127.0.0.1:1420/
 ```
 
-Release APK perlu konfigurasi signing milik Anda. Ikuti [panduan signing Android Tauri](https://v2.tauri.app/distribute/sign/android/). Minimum SDK pada konfigurasi proyek adalah 24. Jangan memasukkan keystore atau password signing ke source frontend.
+Tes memakai fixture kontrak API yang terisolasi; tidak mengakses server atau mengirim aksi ke PC pengguna. Pengujian viewport Windows/Android tidak menggantikan pengujian binary native dan rute jaringan pada perangkat asli.
 
-## Struktur source
-
-| Lokasi | Isi |
-| --- | --- |
-| `src/app.js` | Demo state, rendering halaman, dan handler interaksi |
-| `src/interactions.js` | Animasi, gesture modal, focus, dan visual viewport |
-| `src/styles.css` | Layout responsive dan perbaikan komponen |
-| `src/motion.css` | Transisi dan perilaku mobile |
-| `src/theme.css` | Hierarki warna peach, krem, mint, biru |
-| `src/native.js` | Batas integrasi clipboard dan command Rust |
-| `src/main.js` | Entry frontend Vite |
-| `src-tauri/src/lib.rs` | Entry Tauri mobile/desktop dan command `runtime_info` |
-| `src-tauri/tauri.conf.json` | App, build, CSP, window, dan bundle |
-| `src-tauri/capabilities/default.json` | Izin core dan clipboard tulis teks |
-| `docs/BACKEND_INTEGRATION.md` | Titik penggantian simulasi dengan backend |
-| `docs/VALIDATION.md` | Hasil verifikasi dan batas pengujian |
-
-Identifier aplikasi saat ini `app.hermes.cockpit`. Sesuaikan identifier dan metadata dengan identitas produk Anda sebelum distribusi; lakukan sebelum `android:init` jika ingin nama package Android ikut berubah.
-
-## Batas paket
-
-- Belum ada koneksi ke `hermes-cockpit :3450`, model AI, VPS, SSH bridge, Obsidian, atau Windows PC.
-- Tombol sleep/shutdown/WOL hanya mengubah status demo.
-- Belum ada autentikasi backend, sinkronisasi multi-perangkat, signing release, atau auto-update.
-- Build native dan pengujian pada perangkat nyata belum dijalankan pada lingkungan pembuatan ZIP ini.
-- `package-lock.json` mengunci dependency npm. `Cargo.lock` akan dihasilkan pada build Rust pertama; simpan file tersebut di repository aplikasi Anda setelah build berhasil.
-
-## Referensi implementasi
-
-- [Menambahkan Tauri pada frontend yang sudah ada](https://v2.tauri.app/start/create-project/)
-- [Konfigurasi Vite untuk Tauri](https://v2.tauri.app/start/frontend/vite/)
-- [Konfigurasi Tauri v2](https://v2.tauri.app/reference/config/)
-- [Clipboard plugin dan izin](https://v2.tauri.app/plugin/clipboard/)
-- [Content Security Policy](https://v2.tauri.app/security/csp/)
-- [Prasyarat desktop dan mobile](https://v2.tauri.app/start/prerequisites/)
+Lihat [integrasi backend](docs/BACKEND_INTEGRATION.md), [hasil validasi](docs/VALIDATION.md), dan [rancangan jaringan](docs/REAL_DATA_NETWORK_PLAN.md).
