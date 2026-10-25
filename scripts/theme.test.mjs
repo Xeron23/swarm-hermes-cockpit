@@ -80,3 +80,31 @@ test('ThemeManager persists preference and restores on next initialization', () 
   assert.equal(manager2.initialize(), 'sunset-gold');
   assert.equal(manager2.getTheme().id, 'sunset-gold');
 });
+
+// Structure and browser layout are separate: the latter is covered by smoke-layout.py.
+import { renderThemePanel, renderThemeCard } from '../src/theme_views.js';
+
+test('theme dialog exposes a dedicated scroll body without inline event handlers', () => {
+  const markup = renderThemePanel('ocean-mist');
+  assert.equal((markup.match(/role="dialog"/g) || []).length, 1);
+  assert.match(markup, /class="theme-panel-body"/);
+  assert.match(markup, /data-theme-backdrop/);
+  assert.doesNotMatch(markup, /\bon[a-z]+\s*=/i);
+  assert.equal((markup.match(/data-action="theme-select"/g) || []).length, 4);
+  assert.equal((markup.match(/aria-pressed="true"/g) || []).length, 1);
+});
+
+test('each theme card renders all four color roles and exact hex values', () => {
+  for (const preset of listThemePresets()) {
+    const markup = renderThemeCard(preset, preset.id);
+    for (const role of ['Primary', 'Secondary', 'Supporting 1', 'Supporting 2']) {
+      assert.ok(markup.includes(`>${role}</span>`), role);
+    }
+    for (const color of [preset.primary, preset.secondary, preset.support1, preset.support2]) {
+      assert.ok(markup.includes(`>${color}</span>`), color);
+    }
+    assert.equal((markup.match(/class="swatch"/g) || []).length, 4);
+    assert.match(markup, /aria-pressed="true"/);
+    assert.doesNotMatch(markup, /<div\b/);
+  }
+});

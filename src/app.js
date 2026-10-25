@@ -13,6 +13,15 @@ const workspace = new Workspace(api);
 const updater = new AppUpdater();
 const ui = { page: 'overview', agentId: null, sessionId: null, agentFilter: 'all', eventFilter: 'all', target: 'auto', draft: '', error: '', pending: new Set(), logTraceId: null, connectionDiagnostic: '', themePanelOpen: false, missionDetailId: null };
 let logTimer;
+let themeReturnFocusSelector = '.topbar [data-action="theme-panel"]';
+function dismissThemePanel() {
+  ui.themePanelOpen = false;
+  paint();
+  const preferred = document.querySelector(themeReturnFocusSelector);
+  const target = preferred?.getClientRects().length ? preferred
+    : [...document.querySelectorAll('[data-action="theme-panel"]')].find(el => el.getClientRects().length);
+  target?.focus({ preventScroll: true });
+}
 function notify(message) {
   $('#toast').textContent = message;
   $('#toast').classList.add('visible');
@@ -26,8 +35,16 @@ function paint() {
   const chat = $('#chat-messages');
   const follow = !chat || chat.scrollHeight - chat.scrollTop - chat.clientHeight < 80;
   const scroll = chat?.scrollTop;
+  const themeScroll = document.querySelector('.theme-panel-body')?.scrollTop;
   document.body.classList.toggle('chat-mode', ui.page === 'chat');
   $('#app').innerHTML = render(workspace.state, ui, api, workspace.writable);
+  document.body.classList.toggle('theme-open', ui.themePanelOpen);
+  const themeOverlay = document.getElementById('theme-panel-backdrop');
+  for (const child of document.querySelector('.shell')?.children || []) {
+    child.inert = ui.themePanelOpen && child !== themeOverlay;
+  }
+  const themeBody = document.querySelector('.theme-panel-body');
+  if (themeBody && themeScroll !== undefined) themeBody.scrollTop = themeScroll;
   const replacement = id ? document.getElementById(id) : null;
   if (replacement && !replacement.disabled) {
     replacement.focus({ preventScroll: true });
@@ -136,6 +153,7 @@ document.addEventListener('change', event => {
   if (event.target.id === 'chat-route') ui.target = event.target.value;
 });
 document.addEventListener('click', event => {
+  if (event.target.matches('[data-theme-backdrop]')) { dismissThemePanel(); return; }
   if (event.target.id === 'overlay-backdrop') { close(); return; }
   const button = event.target.closest('[data-action]');
   if (!button || button.disabled) return;
@@ -146,8 +164,17 @@ document.addEventListener('click', event => {
   if (action === 'connection') { connection(); return; }
   if (action === 'app-updates') { appUpdates(); return; }
   if (action === 'inbox') { inbox(); return; }
-  if (action === 'theme-panel') { ui.themePanelOpen = true; paint(); return; }
-  if (action === 'theme-dismiss') { ui.themePanelOpen = false; paint(); return; }
+  if (action === 'theme-panel') {
+    themeReturnFocusSelector = button.closest('.topbar')
+      ? '.topbar [data-action="theme-panel"]' : '.sidebar [data-action="theme-panel"]';
+    close();
+    ui.missionDetailId = null;
+    ui.themePanelOpen = true;
+    paint();
+    document.getElementById(`theme-${themeManager.currentThemeId}`)?.focus({ preventScroll: true });
+    return;
+  }
+  if (action === 'theme-dismiss') { dismissThemePanel(); return; }
   if (action === 'theme-select') { const themeId = button.dataset.themeId; if (themeId) themeManager.setTheme(themeId); paint(); return; }
   if (action === 'theme-reset') { themeManager.setTheme('ocean-mist'); paint(); return; }
   if (action === 'sheet-dismiss') { if (ui.missionDetailId) { ui.missionDetailId = null; paint(); return; } }
@@ -316,6 +343,11 @@ document.addEventListener('submit', event => {
   });
 });
 document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && ui.themePanelOpen) {
+    event.preventDefault();
+    dismissThemePanel();
+    return;
+  }
   if (event.key === 'Escape') close();
   const dialog = document.querySelector('[role="dialog"]');
   if (event.key === 'Tab' && dialog) {

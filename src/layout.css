@@ -1,0 +1,222 @@
+/* Loaded last: responsive shell sizing, without hiding overflowing content. */
+.app-main,
+#page-content,
+.dashboard-grid,
+.dashboard-grid > .column,
+.dashboard-grid section {
+  min-inline-size: 0;
+}
+
+.app-main {
+  padding-top: max(12px, env(safe-area-inset-top, 0px));
+}
+
+.topbar {
+  height: auto;
+  min-height: 88px;
+  padding-block: 16px;
+  margin-bottom: 28px;
+  flex-wrap: wrap;
+  gap: 16px;
+  overflow: visible;
+}
+
+.breadcrumb,
+.topbar .mobile-brand {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+.breadcrumb {
+  flex-wrap: wrap;
+}
+
+.top-actions {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.top-actions .icon-button {
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+}
+
+.top-actions .demo-tag {
+  max-inline-size: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.page-heading {
+  min-inline-size: 0;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.page-heading > div {
+  flex: 1 1 240px;
+  min-inline-size: 0;
+}
+
+.page-heading h1,
+.page-heading p {
+  overflow-wrap: anywhere;
+}
+
+.page-heading > .primary-button {
+  flex: 0 0 auto;
+  width: auto;
+  height: auto;
+  max-inline-size: 100%;
+  min-height: 44px;
+  padding: 12px 16px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.page-heading > .primary-button span {
+  display: inline;
+}
+
+.quick-stats {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: visible;
+}
+
+.quick-stat {
+  min-inline-size: 0;
+  padding: 16px 12px;
+}
+
+.quick-stat:first-child {
+  border-start-start-radius: 13px;
+  border-end-start-radius: 13px;
+}
+
+.quick-stat:last-child {
+  border-start-end-radius: 13px;
+  border-end-end-radius: 13px;
+}
+
+.quick-stat strong,
+.quick-stat p {
+  overflow-wrap: anywhere;
+}
+
+.quick-stat p {
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.dashboard-grid {
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+}
+
+.mission-card {
+  min-inline-size: 0;
+  min-height: 0;
+  overflow: visible;
+  isolation: isolate;
+}
+
+.mission-card::after {
+  border-radius: inherit;
+}
+
+.mission-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.mission-head > div {
+  flex: 1 1 180px;
+  min-inline-size: 0;
+}
+
+.mission-card h2,
+.mission-card .mission-id,
+.mission-card .mission-desc {
+  max-inline-size: 100%;
+  overflow-wrap: anywhere;
+}
+
+.mission-card h2 {
+  margin-block: 12px;
+  font-size: clamp(22px, 2.2vw, 30px);
+}
+
+.mission-card .status-pill {
+  max-inline-size: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.mission-footer,
+.mission-actions,
+.agent-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-inline-size: 0;
+}
+
+.mission-footer button,
+.agent-tag {
+  max-inline-size: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+@media (min-width: 901px) and (max-width: 1100px) {
+  .dashboard-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 900px) {
+  .app-main {
+    padding-inline-start: max(16px, env(safe-area-inset-left, 0px));
+    padding-inline-end: max(16px, env(safe-area-inset-right, 0px));
+    padding-bottom: calc(116px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .topbar {
+    align-items: flex-start;
+    flex-direction: column;
+    margin-bottom: 20px;
+    gap: 12px;
+  }
+
+  .top-actions {
+    width: 100%;
+    justify-content: flex-start;
+    gap: 6px;
+  }
+
+  .top-actions .demo-tag {
+    flex: 1 1 100px;
+    min-inline-size: 0;
+    max-width: none;
+    padding: 8px;
+    font-size: 11px;
+  }
+
+  .chat-mode .app-main {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+}
+
+@media (max-width: 420px) {
+  .page-heading > .primary-button {
+    flex-basis: 100%;
+  }
+}
