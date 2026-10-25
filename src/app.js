@@ -1,3 +1,5 @@
+import { hermesApi } from './api_client.js';
+
 const $ = (s,root=document)=>root.querySelector(s);
 const icons={
 grid:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
@@ -62,7 +64,11 @@ function now(){return new Intl.DateTimeFormat('id-ID',{timeZone:'Asia/Jakarta',h
 function toast(s){const t=$('#toast');t.textContent=s;t.classList.add('visible');clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.classList.remove('visible'),3200)}
 const navItems=[['overview','grid','Overview'],['agents','agents','Agents'],['swarm','swarm','Swarm'],['nodes','server','Nodes']];
 function nav(){return navItems.map(([id,ic,label])=>`<button data-action="navigate" data-page="${id}" class="${(state.page==='chat'?'agents':state.page)===id?'active':''}" ${((state.page==='chat'?'agents':state.page)===id)?'aria-current="page"':''}>${icon(ic)}<span>${label}</span>${id==='agents'?'<span class="count">5</span>':''}</button>`).join('')}
-function shell(){document.body.classList.toggle('chat-mode',state.page==='chat');$('#app').innerHTML=`<div class="shell"><aside class="sidebar">${brand}<div class="side-label">WORKSPACE</div><nav class="side-nav" aria-label="Main navigation">${nav()}</nav><div class="side-label">TOOLS</div><nav class="side-nav"><button data-action="execution">${icon('terminal')}<span>Execution logs</span><span class="count">3</span></button><button data-action="about">${icon('info')}<span>About this preview</span></button></nav><div class="side-bottom"><div class="workspace"><span class="tiny-logo">H</span><div><strong>Personal workspace</strong><small>Dual-node environment</small></div><i class="dot" style="margin-left:auto"></i></div><div class="side-user"><span class="user-avatar">RA</span><div><strong>Rifki Anandita</strong><small>Workspace owner</small></div></div></div></aside><main class="app-main"><header class="topbar"><div class="mobile-brand">${brand}</div><div class="breadcrumb">Workspace ${icon('arrow')}<span>${state.page==='chat'?'Agent workspace':navItems.find(n=>n[0]===state.page)?.[2]||'Overview'}</span></div><div class="top-actions"><span class="online-label"><i class="dot"></i> ${state.pcState==='online'?'All systems operational':'VPS online · PC '+(state.pcState==='sleep'?'sleeping':'offline')}</span><button class="demo-tag" data-action="about" aria-label="About demo mode">DEMO</button><button class="icon-button" data-action="notifications" aria-label="Notifications">${icon('bell')}<span class="notification-dot"></span></button></div></header><div id="page-content">${renderPage()}</div></main><nav class="bottom-nav" aria-label="Mobile navigation">${nav()}</nav></div>`;if(state.page==='chat')scrollChat();window.HermesUI.paint({page:state.page,agent:state.agent,messageCount:state.messages[state.agent]?.length||0,feedId:state.feed[0]?.id})}
+function shell(){document.body.classList.toggle('chat-mode',state.page==='chat');$('#app').innerHTML=`<div class="shell"><aside class="sidebar">${brand}<div class="side-label">WORKSPACE</div><nav class="side-nav" aria-label="Main navigation">${nav()}</nav><div class="side-label">TOOLS</div><nav class="side-nav"><button data-action="execution">${icon('terminal')}<span>Execution logs</span><span class="count">3</span></button><button data-action="about">${icon('info')}<span>About this preview</span></button></nav><div class="side-bottom"><div class="workspace"><span class="tiny-logo">H</span><div><strong>Personal workspace</strong><small>Dual-node environment</small></div><i class="dot" style="margin-left:auto"></i></div><div class="side-user"><span class="user-avatar">RA</span><div><strong>Rifki Anandita</strong><small>Workspace owner</small></div></div></div></aside><main class="app-main"><header class="topbar"><div class="mobile-brand">${brand}</div><div class="breadcrumb">Workspace ${icon('arrow')}<span>${state.page==='chat'?'Agent workspace':navItems.find(n=>n[0]===state.page)?.[2]||'Overview'}</span></div>    <div class="top-actions">
+      <span class="online-label"><i class="dot"></i> ${state.pcState==='online'?'All systems operational':'VPS online · PC '+(state.pcState==='sleep'?'sleeping':'offline')}</span>
+      <button class="demo-tag" data-action="pair-dialog" aria-label="Backend status" style="${hermesApi.accessToken?'background:#9bcec1;color:#244653':''}">${hermesApi.accessToken?'ONLINE':'CONNECT'}</button>
+      <button class="icon-button" data-action="notifications" aria-label="Notifications">${icon('bell')}<span class="notification-dot"></span></button>
+    </div></header><div id="page-content">${renderPage()}</div></main><nav class="bottom-nav" aria-label="Mobile navigation">${nav()}</nav></div>`;if(state.page==='chat')scrollChat();window.HermesUI.paint({page:state.page,agent:state.agent,messageCount:state.messages[state.agent]?.length||0,feedId:state.feed[0]?.id})}
 function pageHeading(title,subtitle,action=true){return `<div class="page-heading"><div><h1>${title}</h1><p>${subtitle}</p></div>${action?`<button class="primary-button" data-action="new-mission" aria-label="Create new mission">${icon('plus')}<span>New mission</span></button>`:''}</div>`}
 function renderPage(){if(state.page==='overview')return dashboard();if(state.page==='agents')return fleetPage();if(state.page==='swarm')return swarmPage();if(state.page==='nodes')return nodesPage();if(state.page==='chat')return chatPage();return dashboard()}
 function constellation(){return `<svg class="constellation" viewBox="0 0 220 220" fill="none" aria-hidden="true"><circle cx="120" cy="104" r="77" stroke="#9bcec1" stroke-opacity=".1"/><circle cx="120" cy="104" r="53" stroke="#9bcec1" stroke-opacity=".1"/><path d="m120 104 43-48m-43 48 63 33m-63-33-48 48m48-48-59-29m59 29 16 76m-16-76 3-76" stroke="#ffebd3" stroke-opacity=".2" stroke-dasharray="3 4"/><circle cx="120" cy="104" r="20" fill="#ffebd3" fill-opacity=".04" stroke="#ffebd3" stroke-opacity=".3"/><path d="M113 96v16m14-16v16m-14-8h14" stroke="#ffebd3" stroke-width="2" opacity=".7"/><g fill="#244653" stroke="#9bcec1" stroke-opacity=".6"><circle cx="163" cy="56" r="10"/><circle cx="183" cy="137" r="8"/><circle cx="72" cy="152" r="9"/><circle cx="61" cy="75" r="7"/><circle cx="136" cy="180" r="6"/><circle cx="123" cy="28" r="5"/></g><g fill="#ffebd3"><circle cx="163" cy="56" r="2"/><circle cx="183" cy="137" r="2"/><circle cx="72" cy="152" r="2"/></g></svg>`}
@@ -118,16 +124,92 @@ function execution(tab='terminal'){state.execTab=tab;const pc=state.executionNod
  if(tab==='browser')body+=`<div class="terminal"><div class="terminal-top"><span>127.0.0.1:3456/docs</span><span>Playwright · sample</span></div><div style="background:#FFEBD3;color:#244653;padding:24px;min-height:240px"><div style="font-size:22px;font-weight:700;margin-bottom:4px">Hermes Webhook API <small style="font-size:9px;background:#67a2c5;padding:3px 6px;border-radius:6px;color:white">v1.0</small></div><div style="font-size:11px;color:#654e46;margin-bottom:26px">OpenAPI 3.1 · Interactive documentation</div><div style="padding:13px;border:1px solid #67a2c5;border-radius:7px;background:#dfeae2;font:10px var(--mono)"><b style="background:#244653;color:white;padding:4px 8px;border-radius:4px">POST</b> /webhook <span style="float:right">202</span></div><div style="margin-top:16px;font:10px var(--mono);line-height:1.8">Response body<br>{ "status": "accepted" }<br><span style="color:#244653">✓ Browser validation passed</span></div></div></div><div class="notice">Contoh snapshot browser dari alur validasi. Belum terhubung ke browser atau PC Anda.</div>`;
  openSheet('Execution console','Tool calls, patches, and browser output in one place.',body,`<button class="secondary-button" data-action="close">Close</button><button class="primary-button" data-action="chat" data-agent="coder">${icon('code')}Chat with Coder</button>`,true)}
 function nodeDetail(id){state.nodeId=id;const pc=id==='pc',offline=pc&&state.pcState!=='online';openSheet(pc?'Windows PC':'VPS Server',pc?'192.168.1.26 · SSH / internal agent bridge':'webserver-xeron · Linux · service node',`<div class="detail-grid"><div class="detail-block"><span>CPU usage</span><strong>${offline?'0':pc?'18':'42'}%</strong><small> / ${pc?'16 threads':'8 vCPU'}</small></div><div class="detail-block"><span>Memory</span><strong>${offline?'—':pc?'12.2 / 32 GB':'5.1 / 8 GB'}</strong></div><div class="detail-block"><span>Disk</span><strong>${pc?'460 / 1,000 GB':'64 / 200 GB'}</strong></div><div class="detail-block"><span>Connectivity</span><strong class="${offline?'':'mint'}">${offline?state.pcState==='sleep'?'Sleeping':'Offline':pc?'4 ms · SSH healthy':'21 ms · Connected'}</strong></div></div><div class="sheet-section-title">${icon('bolt')}Workload capabilities</div><div class="tool-tags">${(pc?['GPU processing','Playwright · headed','Windows desktop','Wake-on-LAN']:['Docker containers','n8n workflows','PM2 daemons','Cron & webhooks']).map(s=>`<span>${s}</span>`).join('')}</div><div class="sheet-section-title">${icon('activity')}Health checks</div>${(pc?['SSH bridge','GPU availability','Desktop session']:['Hermes cockpit :3450','Docker engine','PM2 process manager']).map(t=>`<div class="milestone"><span class="step-icon ${offline?'pending':''}">${icon(offline?'moon':'check')}</span><div><strong>${t}</strong><small>${offline?'Waiting for node':'Healthy · last check just now'}</small></div></div>`).join('')}<div class="node-actions"><button class="secondary-button" data-action="diagnostic" data-node="${id}">${icon('activity')}Run diagnostics</button>${pc?`<button class="secondary-button" data-action="pc-power" data-power="${offline?'online':'sleep'}">${icon(offline?'power':'moon')}${offline?'Wake on LAN':'Sleep'}</button>${!offline?`<button class="secondary-button danger-button" data-action="confirm-shutdown">${icon('power')}Shutdown</button>`:''}`:''}</div><div class="notice">Kontrol node dan health check pada preview ini disimulasikan. Tidak ada perintah yang dikirim ke perangkat Anda.</div>`,`<button class="primary-button" data-action="node-task" data-node="${id}">${icon('plus')}Assign a task to this node</button>`)}
+function pairDialog(){
+  const currentHost = localStorage.getItem('hermes_base_url') || 'http://192.168.1.4:3450';
+  const isPaired = !!hermesApi.accessToken;
+  openSheet(
+    isPaired ? 'Backend Connected' : 'Connect to Backend',
+    isPaired ? `Workspace: ${hermesApi.workspaceId?.slice(0,8)}...` : 'Pair this device with your Hermes VPS server',
+    `<form id="pair-form">
+      <label class="field">
+        <span class="field-label">Server Host URL</span>
+        <input id="server-url" name="url" value="${esc(currentHost)}" placeholder="http://192.168.1.4:3450" required autocomplete="off">
+      </label>
+      ${!isPaired ? `
+      <label class="field">
+        <span class="field-label">26-Character Pairing Code</span>
+        <input id="pair-code" name="code" placeholder="e.g. M24GGV2DTPTJDX32RTMK45QCJN" required maxlength="32" style="text-transform:uppercase" autocomplete="off">
+      </label>
+      <label class="field">
+        <span class="field-label">Device Name</span>
+        <input id="device-name" name="device" value="Cockpit Client" required maxlength="50" autocomplete="off">
+      </label>
+      ` : `
+      <div class="notice">Perangkat ini sudah terautentikasi dan menerima data live dari backend PostgreSQL & WebSocket telemetry.</div>
+      `}
+    </form>`,
+    isPaired 
+      ? `<button class="secondary-button" data-action="disconnect-backend">Disconnect</button><button class="primary-button" data-action="close">Done</button>`
+      : `<button class="primary-button" type="submit" form="pair-form">${icon('network')} Pair & Connect</button>`
+  );
+}
+
 function about(){openSheet('Meet your mission control','Hermes · Demo app',`<div style="margin-bottom:23px">${brand}</div><p>Kelola agent fleet, pantau komunikasi antar agen, dan arahkan eksekusi ke VPS atau Windows PC dari satu tampilan mobile.</p><div class="sheet-section-title">${icon('bolt')}Try the prototype</div>${[['New mission','Buat misi dan pilih node tujuan.'],['Agent workspaces','Buka chat terpisah untuk setiap agen.'],['Swarm feed','Ketuk event untuk melihat trace, payload, dan token.'],['Execution nodes','Periksa metrik dan coba kontrol daya PC.']].map(([a,b])=>`<div class="milestone"><span class="step-icon">${icon('check')}</span><div><strong>${a}</strong><small>${b}</small></div></div>`).join('')}<div class="notice">Aplikasi ini berjalan dalam mode demo. Percakapan, telemetry, terminal, dan kontrol perangkat menggunakan data simulasi. Riwayat demo disimpan secara lokal di perangkat ini.</div>`,`<button class="secondary-button" data-action="reset-demo">Reset demo</button><button class="primary-button" data-action="close">Explore Hermes ${icon('arrow')}</button>`)}
 function notifications(){openSheet('Notifications','Recent activity in your workspace',state.feed.slice(0,4).map(feedItem).join(''),`<button class="primary-button" data-action="navigate" data-page="swarm">Open swarm feed ${icon('arrow')}</button>`)}
 function chatReply(id,text,node){const lower=text.toLowerCase();if(node==='pc'&&state.pcState!=='online')return 'Windows PC sedang '+(state.pcState==='sleep'?'sleep':'offline')+'. Bangunkan node melalui Nodes → Windows PC → Wake on LAN, lalu kirim kembali task ini. Task belum dieksekusi.';if(id==='main')return `Misi diterima. Rencana demo saya:\n\n1. Researcher menyiapkan konteks dan kebutuhan.\n2. Coder mengerjakan implementasi di ${node==='pc'?'Windows PC':'VPS'}.\n3. QA memeriksa hasil dan pengujian.\n4. DevOps memverifikasi service.\n\nHandoff contoh sudah ditambahkan ke Swarm feed. Gunakan New mission untuk melacak milestone-nya.`;if(id==='coder')return /test|pengujian|hasil/.test(lower)?'Hasil pengujian contoh: 12 passed, 0 failed dalam 2.84 detik. Exit code 0.\n\nPerubahan sudah diteruskan ke QA untuk code review. Buka execution console untuk memeriksa terminal dan file diff.':`Task diterima untuk ${node==='pc'?'Windows PC (192.168.1.26)':'VPS (webserver-xeron)'}.\n\nPada alur demo ini, saya menyiapkan workspace, menjalankan build, lalu memvalidasi hasilnya. Build contoh selesai dengan exit code 0. Detail dapat Anda lihat di execution console.`;if(id==='devops')return /log|3450/.test(lower)?'Log contoh hermes-cockpit :3450:\n\n[INFO] Application startup complete\n[INFO] GET /health → 200 OK\n[INFO] Agent bridge connected\n[INFO] Task queue healthy\n\nTidak ada error pada cuplikan log demo ini.':'Health check demo selesai:\n\nVPS · CPU 42% · RAM 64% · Disk 32%\nUptime 14d 8h · Ping 21 ms\n\nPC · CPU 18% · RAM 38% · Disk 46%\nUptime 6h 42m · Ping 4 ms\n\nBuka Nodes untuk detail metrik dan kontrol daya.';if(id==='researcher')return 'Saya sudah menyiapkan alur pencarian demo:\n\n1. Telusuri referensi yang sesuai dengan permintaan Anda.\n2. Cari konteks terkait di Obsidian Brain.\n3. Susun ringkasan, sumber, dan rekomendasi.\n\nPada prototipe ini belum ada pencarian web atau akses vault sungguhan; hasil dan handoff yang tampil adalah contoh.';return 'Review demo selesai.\n\n✓ Acceptance criteria tervalidasi\n✓ 12 automated tests passed\n✓ Signature validation tersedia\n✓ Tidak ada temuan pada security scan contoh\n\nHasil review telah diteruskan ke Main melalui Swarm feed.'}
-function sendChat(text){text=text.trim();if(!text||state.chatBusy[state.agent])return;const id=state.agent;let node=state.route==='auto'?(/\bpc\b|gpu|windows|desktop|compile/i.test(text)?'pc':'vps'):state.route;getMessages(id).push({role:'user',text,time:now(),node});state.chatBusy[id]=true;persist();shell();setTimeout(()=>{const failed=node==='pc'&&state.pcState!=='online';getMessages(id).push({role:'agent',text:chatReply(id,text,node),time:now(),node,execution:['coder','devops','qa'].includes(id)&&!failed});state.chatBusy[id]=false;if(!failed)addFeed({from:id,to:id==='main'?'coder':id==='qa'?'main':undefined,text:id==='main'?'Rencana demo dibuat; implementasi diteruskan ke Coder.':`${getAgent(id).name} menyelesaikan task contoh: ${text.slice(0,95)}`,tag:id==='main'?'Task dispatched':'Demo task complete · exit 0',type:id==='main'?'handoff':'tool',node,tokens:1280});persist();if(state.page==='chat'&&state.agent===id)shell();else toast(`${getAgent(id).name} completed the demo task`);},1100)}
+async function sendChat(text){
+  text = text.trim();
+  if(!text || state.chatBusy[state.agent]) return;
+  const id = state.agent;
+  let node = state.route==='auto'?(/\bpc\b|gpu|windows|desktop|compile/i.test(text)?'pc':'vps'):state.route;
+
+  getMessages(id).push({role:'user',text,time:now(),node});
+  state.chatBusy[id]=true;
+  persist();
+  shell();
+
+  try {
+    // If paired with real backend, send via API Client
+    if (hermesApi.accessToken) {
+      if (!state.sessionIds) state.sessionIds = {};
+      let sessId = state.sessionIds[id];
+      if (!sessId) {
+        const newSess = await hermesApi.createSession(id, `Direct chat: ${id}`, true);
+        sessId = newSess.id;
+        state.sessionIds[id] = sessId;
+      }
+      await hermesApi.sendMessage(sessId, text, { target_node: node });
+    } else {
+      // Fallback demo response if not paired yet
+      setTimeout(()=>{
+        const failed=node==='pc'&&state.pcState!=='online';
+        getMessages(id).push({role:'agent',text:chatReply(id,text,node),time:now(),node,execution:['coder','devops','qa'].includes(id)&&!failed});
+        state.chatBusy[id]=false;
+        if(!failed)addFeed({from:id,to:id==='main'?'coder':id==='qa'?'main':undefined,text:id==='main'?'Rencana demo dibuat; implementasi diteruskan ke Coder.':`${getAgent(id).name} menyelesaikan task: ${text.slice(0,95)}`,tag:id==='main'?'Task dispatched':'Task complete · exit 0',type:id==='main'?'handoff':'tool',node,tokens:1280});
+        persist();
+        if(state.page==='chat'&&state.agent===id)shell();
+        else toast(`${getAgent(id).name} completed task`);
+      },1100);
+    }
+  } catch(err) {
+    state.chatBusy[id]=false;
+    toast(`Backend error: ${err.message}`);
+    shell();
+  }
+}
 document.addEventListener('click',async e=>{if(e.target.id==='overlay-backdrop'){closeSheet();return}const b=e.target.closest('[data-action]');if(!b)return;const action=b.dataset.action;
  if(action==='navigate'){closeSheet();state.page=b.dataset.page;shell();window.scrollTo(0,0)}
  if(action==='chat'){closeSheet();state.agent=b.dataset.agent;state.page='chat';shell();window.scrollTo(0,0)}
  if(action==='new-mission')openNewMission();
  if(action==='close')closeSheet();
  if(action==='about')about();
+ if(action==='pair-dialog')pairDialog();
+ if(action==='disconnect-backend'){
+   hermesApi.clearTokens();
+   closeSheet();
+   shell();
+   toast('Disconnected from backend. Switched to local mode.');
+ }
  if(action==='notifications')notifications();
  if(action==='mission-detail')missionDetail();
  if(action==='execution'){state.executionNode=b.dataset.node||(state.page==='chat'?(getMessages(state.agent).filter(m=>m.execution).at(-1)?.node||'vps'):'vps');execution()}
@@ -152,6 +234,77 @@ document.addEventListener('click',async e=>{if(e.target.id==='overlay-backdrop')
  if(action==='reset-demo'){state.mission={...initialMission};state.feed=initialFeed.map(f=>({...f}));state.messages={};state.pcState='online';state.route='auto';state.page='overview';persist();closeSheet();shell();toast('Demo reset to its initial state')}
 });
 document.addEventListener('change',e=>{if(e.target.id==='chat-route')state.route=e.target.value});
-document.addEventListener('submit',e=>{if(e.target.id==='chat-form'){e.preventDefault();sendChat($('#chat-input').value)}if(e.target.id==='mission-form'){e.preventDefault();const title=$('#mission-title').value.trim(),prompt=$('#mission-prompt').value.trim();if(!title||!prompt){toast('Fill in the mission name and instructions');return}if(state.newRoute==='pc'&&state.pcState!=='online'){toast('Wake the PC in Nodes before launching');return}const node=state.newRoute==='auto'?(/\bpc\b|gpu|windows|desktop/i.test(prompt)?'pc':'vps'):state.newRoute;if(node==='pc'&&state.pcState!=='online'){toast('Auto route selected PC. Wake the node first.');return}state.mission={title,prompt,node,id:'MSN-'+String(25+state.feed.filter(f=>f.tag==='Mission created').length).padStart(3,'0'),stage:1,paused:false,description:'Main has assigned specialists to your mission'};addFeed({from:'main',to:'coder',text:prompt,tag:'Mission created',type:'handoff',node,tokens:840});persist();closeSheet();state.page='overview';shell();window.scrollTo(0,0);toast('Mission launched · agents assigned');}});
+document.addEventListener('submit',async e=>{
+  if(e.target.id==='pair-form'){
+    e.preventDefault();
+    const url = $('#server-url').value.trim();
+    const code = $('#pair-code')?.value.trim();
+    const device = $('#device-name')?.value.trim() || 'Cockpit Client';
+    if(!url || !code){ toast('Enter server URL and pairing code'); return; }
+    
+    localStorage.setItem('hermes_base_url', url);
+    hermesApi.baseUrl = url.replace(/\/$/, '');
+    hermesApi.wsUrl = hermesApi.baseUrl.replace(/^http/, 'ws');
+    
+    try {
+      toast('Connecting to backend...');
+      await hermesApi.pair(code, device);
+      await initBackendTelemetry();
+      closeSheet();
+      shell();
+      toast('Paired successfully! Real backend connected.');
+    } catch(err) {
+      toast(`Pairing failed: ${err.message}`);
+    }
+    return;
+  }
+  if(e.target.id==='chat-form'){e.preventDefault();sendChat($('#chat-input').value)}if(e.target.id==='mission-form'){e.preventDefault();const title=$('#mission-title').value.trim(),prompt=$('#mission-prompt').value.trim();if(!title||!prompt){toast('Fill in the mission name and instructions');return}if(state.newRoute==='pc'&&state.pcState!=='online'){toast('Wake the PC in Nodes before launching');return}const node=state.newRoute==='auto'?(/\bpc\b|gpu|windows|desktop/i.test(prompt)?'pc':'vps'):state.newRoute;if(node==='pc'&&state.pcState!=='online'){toast('Auto route selected PC. Wake the node first.');return}state.mission={title,prompt,node,id:'MSN-'+String(25+state.feed.filter(f=>f.tag==='Mission created').length).padStart(3,'0'),stage:1,paused:false,description:'Main has assigned specialists to your mission'};addFeed({from:'main',to:'coder',text:prompt,tag:'Mission created',type:'handoff',node,tokens:840});persist();closeSheet();state.page='overview';shell();window.scrollTo(0,0);toast('Mission launched · agents assigned');}});
+async function initBackendTelemetry() {
+  if (!hermesApi.accessToken) return;
+  try {
+    const bootstrap = await hermesApi.getBootstrap();
+    if (bootstrap.agents) {
+      for (const ba of bootstrap.agents) {
+        const local = agents.find(a => a.id === ba.id);
+        if (local) {
+          local.status = ba.status === 'idle' ? 'Standby' : ba.status === 'busy' ? 'Working' : ba.status;
+        }
+      }
+    }
+    await hermesApi.connectTelemetry((envelope) => {
+      if (envelope.event_type === 'MESSAGE_FINAL') {
+        const payload = envelope.payload || {};
+        const agentId = envelope.sender;
+        if (agentId && payload.content) {
+          getMessages(agentId).push({
+            role: 'agent',
+            text: payload.content,
+            time: now(),
+            node: envelope.node || 'vps'
+          });
+          state.chatBusy[agentId] = false;
+          persist();
+          shell();
+        }
+      } else if (envelope.event_type === 'TASK_STATE') {
+        const payload = envelope.payload || {};
+        addFeed({
+          from: envelope.sender,
+          text: `Task ${payload.task_id?.slice(0,8)} status updated to ${payload.status}`,
+          tag: `Task ${payload.status}`,
+          type: 'tool',
+          node: envelope.node || 'vps',
+          tokens: 500
+        });
+        shell();
+      }
+    });
+  } catch(e) {
+    console.warn('Telemetry init error:', e);
+  }
+}
+
+initBackendTelemetry();
+
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&state.overlay)closeSheet();if(e.target.id==='chat-input'&&e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('#chat-form').requestSubmit()}if(e.key==='Tab'&&state.overlay){const els=[...document.querySelectorAll('#overlay-root button:not([disabled]), #overlay-root input, #overlay-root textarea, #overlay-root select, #overlay-root [tabindex="0"]')].filter(el=>el.getClientRects().length&&!el.closest('[inert]'));const first=els[0],last=els.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus()}}});
 shell();
