@@ -19,7 +19,7 @@ const nativeCalls = [];
 globalThis.isTauri = true;
 mockIPC((command, args) => {
   nativeCalls.push({ command, args });
-  if (command === 'runtime_info') return { app: 'Hermes Cockpit', version: '0.1.2', platform: 'android', mode: 'live', commit: 'fixture-commit', build_run: '14' };
+  if (command === 'runtime_info') return { app: 'Hermes Cockpit', version: '0.1.3', platform: 'android', mode: 'live', commit: 'fixture-commit', build_run: '15' };
   if (command === 'plugin:clipboard-manager|write_text') return null;
   throw new Error(`Unexpected native command: ${command}`);
 });
@@ -57,26 +57,42 @@ assert.deepEqual(received, ['early replay']);
 // The packaged app must use Rust HTTP, not the WebView fetch blocked by CSP.
 const { httpFetch } = await import('../src/transport.js');
 const originalFetch = globalThis.fetch;
-let bodyRead = false;
 globalThis.fetch = () => { throw new Error('Native networking must not use WebView fetch'); };
 mockIPC((command, args) => {
-  if (command === 'plugin:http|fetch') {
-    assert.equal(args.clientConfig.url, 'http://192.168.1.4:3450/health/ready');
-    assert.equal(args.clientConfig.method, 'GET');
-    assert.equal(args.clientConfig.maxRedirections, 0);
-    return 31;
+  if (command === 'backend_request') {
+    assert.equal(args.request.url, 'http://192.168.1.4:3450/health/ready');
+    assert.equal(args.request.method, 'GET');
+    return { status: 200, body: '{"status":"ok"}' };
   }
-  if (command === 'plugin:http|fetch_send') return { status: 200, statusText: 'OK', url: 'http://192.168.1.4:3450/health/ready', headers: [['content-type', 'application/json']], rid: 32 };
-  if (command === 'plugin:http|fetch_read_body') {
-    if (bodyRead) return [1];
-    bodyRead = true;
-    return [...new TextEncoder().encode('{"status":"ok"}'), 0];
-  }
-  if (command === 'plugin:http|fetch_cancel_body') return null;
   throw new Error(`Unexpected native HTTP command: ${command}`);
 });
 try { assert.deepEqual(await (await httpFetch('http://192.168.1.4:3450/health/ready', {})).json(), { status: 'ok' }); }
 finally { globalThis.fetch = originalFetch; }
+const aborted = new AbortController();
+aborted.abort();
+mockIPC(() => { throw new Error('An aborted request must not reach Rust'); });
+await assert.rejects(httpFetch('http://192.168.1.4:3450/health/ready', { signal: aborted.signal }), { name: 'AbortError' });
+const { HermesApiClient } = await import('../src/api_client.js');
+const api = new HermesApiClient({ storage: null });
+let nativeRequests = 0;
+mockIPC((command, { request }) => {
+  assert.equal(command, 'backend_request');
+  nativeRequests++;
+  if (request.url.endsWith('/auth/pair')) {
+    assert.equal(request.method, 'POST');
+    assert.equal(request.headers.some(([name]) => name === 'authorization'), false);
+    assert.equal(JSON.parse(request.body).pairing_code, 'A'.repeat(26));
+    return { status: 200, body: JSON.stringify({ access_token: 'fixture-access', refresh_token: 'fixture-refresh', device_id: 'fixture-device', workspace_id: 'fixture-workspace' }) };
+  }
+  assert.ok(request.url.endsWith('/bootstrap'));
+  assert.deepEqual(request.headers.find(([name]) => name === 'authorization'), ['authorization', 'Bearer fixture-access']);
+  return { status: 200, body: '{"workspace_id":"fixture-workspace"}' };
+});
+await api.pair('A'.repeat(26), 'Fixture');
+assert.equal((await api.getBootstrap()).workspace_id, 'fixture-workspace');
+assert.equal(nativeRequests, 2);
+mockIPC(() => Promise.reject({ code: 'CONNECTION_REFUSED', message: 'Safe Rust classification' }));
+await assert.rejects(api.getHealth(), { code: 'CONNECTION_REFUSED', endpoint: '/health/ready' });
 clearMocks();
 delete globalThis.isTauri;
 console.log('PASS: clipboard/runtime, native HTTP without WebView fetch, and native WebSocket lifecycle (mocked)');

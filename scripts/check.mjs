@@ -32,7 +32,8 @@ assert.deepEqual(capabilities.windows, ['main']);
 assert.ok(capabilities.permissions.includes('core:default'));
 assert.ok(capabilities.permissions.includes('clipboard-manager:allow-write-text'));
 assert.ok(capabilities.permissions.includes('websocket:default'));
-assert.deepEqual(capabilities.permissions.find(p => p.identifier === 'http:default').allow, [{ url: 'http://192.168.1.4:3450/**' }]);
+assert.ok(capabilities.permissions.includes('allow-backend-request'));
+assert.ok(capabilities.permissions.includes('allow-runtime-info'));
 
 for (const filename of base.bundle.icon) await access(path.join(root, 'src-tauri', filename));
 for (const filename of await readdir(path.join(root, 'src'))) {

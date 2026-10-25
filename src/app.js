@@ -1,7 +1,7 @@
 import { hermesApi as api, items } from './api_client.js';
 import { Workspace, metricRows } from './workspace.js';
 import { $, esc } from './ui.js';
-import { render, connectionBody, actionButton, time } from './views.js';
+import { render, connectionBody, actionButton, time, stageText } from './views.js';
 import { formatApiError } from './diagnostics.js';
 import { BUILD_INFO } from './build_info.js';
 
@@ -55,7 +55,8 @@ function connection() {
   const footer = api.accessToken && workspace.state.status !== 'auth_required'
     ? `${actionButton('reconnect', 'Hubungkan ulang')}${actionButton('revoke-confirm', 'Cabut akses perangkat')}${actionButton('forget-confirm', 'Hapus sesi lokal')}`
     : '<button class="primary-button" type="submit" form="pair-form">Pasangkan perangkat</button>';
-  sheet('Server & jaringan', 'LAN langsung atau subnet Tailscale melalui Proxmox', connectionBody(api, workspace.state, ui.connectionDiagnostic || workspace.state.error), `${actionButton('test-connection', 'Uji API tanpa pairing')}${footer}`);
+  const diagnostic = [...new Set([ui.connectionDiagnostic, workspace.state.error].filter(Boolean))].join('\n');
+  sheet('Server & jaringan', 'LAN langsung atau subnet Tailscale melalui Proxmox', connectionBody(api, workspace.state, diagnostic), `${actionButton('test-connection', 'Uji API tanpa pairing')}${actionButton('copy-connection', 'Salin laporan koneksi')}${footer}`);
   window.HermesNative.getRuntimeInfo().then(info => {
     const element = $('#native-build-info');
     if (element) element.textContent = `${info.platform} · ${info.version} · ${info.commit || 'commit tidak tersedia'} · build ${info.build_run || 'tidak tersedia'}`;
@@ -95,6 +96,10 @@ async function loadLogs(id) {
 }
 workspace.subscribe(() => {
   paint();
+  if ($('#connection-stage')) $('#connection-stage').textContent = stageText(workspace.state.connectionStage);
+  if ($('#connection-diagnostics') && workspace.state.error) {
+    $('#connection-diagnostics').textContent = [...new Set([ui.connectionDiagnostic, workspace.state.error].filter(Boolean))].join('\n');
+  }
   const event = workspace.state.events[0];
   if (ui.logTraceId && event?.event_type === 'TOOL_LOG_CHUNK' && event.payload?.trace_id === ui.logTraceId) {
     clearTimeout(logTimer);
@@ -123,7 +128,20 @@ document.addEventListener('click', event => {
       ui.connectionDiagnostic = health?.status === 'ok'
         ? `API dapat dijangkau. Status: ok; service: ${health.service || 'tidak dilaporkan'}; versi backend: ${health.version || 'tidak dilaporkan'}. [GET /health/ready]`
         : 'API merespons, tetapi format/status health belum menunjukkan siap. [GET /health/ready]';
-      if ($('#connection-diagnostics')) $('#connection-diagnostics').textContent = ui.connectionDiagnostic;
+      if ($('#connection-diagnostics')) $('#connection-diagnostics').textContent = [ui.connectionDiagnostic, workspace.state.error].filter(Boolean).join('\n');
+    }
+    if (action === 'copy-connection') {
+      const info = await window.HermesNative.getRuntimeInfo();
+      const text = [
+        `Client: ${BUILD_INFO.version} ${BUILD_INFO.commit} build ${BUILD_INFO.run || 'local'}`,
+        `Runtime: ${info.platform} ${info.version} ${info.commit || 'unknown'} build ${info.build_run || 'local'}`,
+        `API: ${api.baseUrl}`,
+        `Status: ${workspace.state.status}; tahap: ${stageText(workspace.state.connectionStage)}`,
+        `Pairing tersimpan: ${Boolean(api.accessToken)}`,
+        $('#connection-diagnostics')?.textContent || 'Belum ada hasil diagnostik.'
+      ].join('\n');
+      await window.HermesNative.copyText(text);
+      notify('Laporan koneksi disalin tanpa kode pairing atau token.');
     }
     if (action === 'refresh') { await workspace.refresh(); notify('Snapshot diperbarui dari backend.'); }
     if (action === 'reconnect') { close(); await workspace.connect(); }
@@ -209,8 +227,11 @@ document.addEventListener('submit', event => {
       if (form.id === 'pair-form') {
         if ($('#connection-diagnostics')) $('#connection-diagnostics').textContent = 'Mengirim pairing ke API…';
         await api.pair(data.get('code'), data.get('device'));
-        ui.connectionDiagnostic = '';
-        form.reset(); close(); await workspace.connect();
+        ui.connectionDiagnostic = 'Pairing diterima backend. Memeriksa workspace dan telemetry…';
+        form.reset();
+        await workspace.connect();
+        if (workspace.state.status === 'connected') { ui.connectionDiagnostic = ''; close(); }
+        else { ui.connectionDiagnostic = 'Pairing diterima backend; koneksi workspace/telemetry belum selesai.'; connection(); }
       } else {
         workspace.requireOnline();
         if (form.id === 'chat-form') {

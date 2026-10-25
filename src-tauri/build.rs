@@ -8,5 +8,8 @@ fn main() {
     let run = std::env::var("GITHUB_RUN_NUMBER").unwrap_or_else(|_| "local".into());
     println!("cargo:rustc-env=HERMES_BUILD_COMMIT={commit}");
     println!("cargo:rustc-env=HERMES_BUILD_RUN={run}");
-    tauri_build::build();
+    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
+        tauri_build::AppManifest::new().commands(&["runtime_info", "backend_request"]),
+    ))
+    .expect("Tauri build configuration");
 }

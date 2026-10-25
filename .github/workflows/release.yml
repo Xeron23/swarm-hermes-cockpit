@@ -67,6 +67,13 @@ jobs:
         run: npx tauri build --ci --bundles msi,nsis -- --locked
       - name: Verify frontend source identity after native build
         run: node scripts/check-build-info.mjs
+      - name: Verify native HTTP and command permissions on Windows
+        run: cargo test --release --lib --manifest-path src-tauri/Cargo.toml --offline --locked
+        env:
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+          ALL_PROXY: http://127.0.0.1:9
+          NO_PROXY: ''
       - name: Collect Windows installers
         shell: pwsh
         run: |

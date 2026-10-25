@@ -12,6 +12,7 @@ Kontrak implementasi berasal dari spesifikasi API v1.0.0 dan EventEnvelope yang 
 | `src/views.js` | Renderer data backend, status koneksi, metrik null/stale dan empty state |
 | `src/app.js` | Navigasi, form, interaksi pengguna, konfirmasi daya, approval/question dengan request hash |
 | `src/native.js` | Clipboard dan informasi runtime perangkat client |
+| `src-tauri/src/backend.rs` | HTTP langsung ke VM tanpa proxy sistem, pembatasan origin/path/header, timeout dan klasifikasi error OS |
 
 ## Kontrak yang dipakai
 

@@ -171,7 +171,7 @@ export class HermesApiClient {
     this.socket = null;
     if (socket) Promise.resolve(socket.close()).catch(() => {});
   }
-  startTelemetry({ onEvent, onStatus, beforeConnect = async () => {} }) {
+  startTelemetry({ onEvent, onStatus, beforeConnect = async () => {}, onStage = () => {} }) {
     this.stopTelemetry();
     const generation = this.generation;
     let attempts = 0;
@@ -196,11 +196,13 @@ export class HermesApiClient {
       try {
         await beforeConnect();
         if (!current()) { if (!this.accessToken) onStatus('auth_required'); return; }
+        onStage('ticket');
         const ticket = await this.request('/api/v1/auth/ws-ticket', { method: 'POST', body: '{}' });
         if (typeof ticket?.ticket !== 'string' || ticket.subprotocol !== 'hermes.telemetry.v1') throw new ApiError('Tiket telemetry tidak valid.', { code: 'INVALID_RESPONSE', endpoint: '/api/v1/auth/ws-ticket', method: 'POST' });
         if (!current()) { if (!this.accessToken) onStatus('auth_required'); return; }
         const url = `${this.baseUrl.replace(/^http/, 'ws')}/ws/telemetry?ticket=${encodeURIComponent(ticket.ticket)}&after_seq=${encodeURIComponent(this.lastEventSeq)}`;
         let closed = false;
+        onStage('telemetry');
         const socket = await this.socketFactory(url, ticket.subprotocol, {
           close: () => { closed = true; if (attempt === connectionEpoch) reconnect(); },
           message: text => {
@@ -216,7 +218,7 @@ export class HermesApiClient {
             onEvent(event);
           }
         }).catch(error => {
-          const failure = transportFailure(error, { native: isTauri() });
+          const failure = transportFailure(error, { native: isTauri(), websocket: true });
           throw new ApiError(`Telemetry: ${failure.message}`, { ...failure, code: failure.code === 'NETWORK_ERROR' ? 'WS_HANDSHAKE_FAILED' : failure.code, endpoint: '/ws/telemetry', method: 'GET' });
         });
         if (!current() || attempt !== connectionEpoch || closed) { await socket.close(); return; }
@@ -231,7 +233,7 @@ export class HermesApiClient {
         reconnect();
       }
     };
-    connect();
+    return connect();
   }
 }
 export const hermesApi = new HermesApiClient();

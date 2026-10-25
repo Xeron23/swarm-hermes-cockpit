@@ -6,14 +6,14 @@ Respons tersebut membuktikan API port 3450 dapat dijangkau dari PC. Respons itu 
 
 ## Temuan client
 
-Pesan `Pairing failed: ...` ditemukan pada frontend lama di commit `172b051`. Client tersebut mengirim request dengan fetch WebView, sedangkan CSP paket membatasi `connect-src` ke IPC. Reproduksi fetch lama dengan CSP tersebut menghasilkan pesan yang sama, tanpa request mencapai backend. Source saat ini memakai plugin HTTP dan WebSocket native; scope HTTP untuk health, pairing, bootstrap, dan ws-ticket telah diperiksa terhadap alamat VM.
+Pesan `Pairing failed: ...` ditemukan pada frontend lama di commit `172b051`. Client tersebut mengirim request dengan fetch WebView, sedangkan CSP paket membatasi `connect-src` ke IPC. Reproduksi fetch lama dengan CSP tersebut menghasilkan pesan yang sama, tanpa request mencapai backend. Versi 0.1.2 memakai plugin HTTP dan WebSocket native; versi 0.1.3 mengganti HTTP dengan command Rust khusus backend yang mengikuti rute OS langsung ke VM.
 
 Ini merupakan indikasi frontend lama masih berjalan. Isi installer yang dipasang pengguna belum dapat diambil dan dibandingkan dari cloud, sehingga penyebab pada perangkat belum dipastikan. Pengujian cache build lokal tetap memicu kompilasi ulang ketika frontend berubah.
 
 ## Pemeriksaan pada Windows
 
-1. Tutup seluruh proses Hermes Cockpit sebelum memasang installer 0.1.2 dari build terbaru yang berhasil di GitHub Releases.
-2. Buka **Server & jaringan**. **Client build** dan **Runtime build** harus menunjukkan versi 0.1.2 dan commit yang sama. Transport harus **Native HTTP + WebSocket**. Identitas yang berbeda memunculkan pesan untuk memasang installer dari build yang sama.
+1. Tutup seluruh proses Hermes Cockpit sebelum memasang installer 0.1.3 dari build terbaru yang berhasil di GitHub Releases.
+2. Buka **Server & jaringan**. **Client build** dan **Runtime build** harus menunjukkan versi 0.1.3 dan commit yang sama. Transport harus **Native HTTP + WebSocket**. Identitas yang berbeda memunculkan pesan untuk memasang installer dari build yang sama.
 3. Klik **Uji API tanpa pairing**. Tombol ini hanya melakukan GET `/health/ready`, tanpa token atau kode pairing. Hasil sukses seharusnya menampilkan service `api` dan versi backend 1.0.0.
 4. Jika health berhasil, lakukan pairing dengan kode sekali pakai yang masih berlaku. Jangan membagikan kode atau token dalam laporan masalah.
 5. Jika gagal, salin pesan pada dialog beserta Client build, Runtime build, dan Transport. Error menampilkan tahap/endpoint sehingga health, pairing, bootstrap, dan telemetry dapat dibedakan.
@@ -31,3 +31,7 @@ Ini merupakan indikasi frontend lama masih berjalan. Isi installer yang dipasang
 Alamat API tetap `192.168.1.4:3450` melalui LAN maupun subnet Tailscale. `100.114.42.71` adalah Proxmox subnet router, bukan alamat langsung API VM. Transport native tidak memerlukan penambahan izin CORS browser untuk melakukan HTTP API.
 
 Versi 0.1.2 mempertahankan error dalam dialog dan menyamarkan kode pairing/token yang diketahui dari pesan. Error mentah native yang dapat berisi URL tiket atau header tidak ditampilkan. Permintaan mutasi yang hasilnya belum diketahui tidak diputar ulang otomatis.
+
+## Perbaikan 0.1.3
+
+HTTP native kini memakai command Rust yang membatasi request ke API VM dan tidak mewarisi proxy sistem. Dialog membedakan pairing yang diterima dari kegagalan bootstrap/tiket/handshake, mempertahankan error telemetry meskipun health/polling berhasil, dan menyediakan **Salin laporan koneksi**. Lihat [analisis beserta reproduksi](CONNECTION_ANALYSIS.md).

@@ -45,7 +45,7 @@ Untuk client native:
 npm run dev
 ```
 
-Untuk tampilan web development: `npm run web:dev`. Browser memakai fetch/WebSocket browser dan memerlukan CORS serta izin jaringan lokal yang sesuai. Tauri Windows/Android memakai plugin HTTP dan WebSocket native, sehingga permintaan backend tidak bergantung pada izin koneksi eksternal WebView. HTTP native dibatasi ke alamat VM di capability; verifikasi TLS tidak dimatikan. API deployment saat ini masih HTTP, bukan HTTPS.
+Untuk tampilan web development: `npm run web:dev`. Browser memakai fetch/WebSocket browser dan memerlukan CORS serta izin jaringan lokal yang sesuai. Tauri Windows/Android memakai command HTTP Rust khusus backend dan WebSocket native, sehingga permintaan backend tidak bergantung pada izin koneksi eksternal WebView. HTTP native membatasi origin/path di Rust dan memakai koneksi langsung mengikuti rute OS, tanpa proxy HTTP sistem; command dibatasi ke window utama melalui capability; verifikasi TLS tidak dimatikan. API deployment saat ini masih HTTP, bukan HTTPS.
 
 ## Pairing dan penggunaan
 
@@ -59,7 +59,7 @@ Refresh token berotasi secara bersama untuk permintaan bersamaan. Jika hasil POS
 
 Saat offline, snapshot yang sudah diterima diberi label data lama dan aksi dinonaktifkan. POST tugas/aksi tidak diulang otomatis setelah kegagalan jaringan. Periksa keadaan backend sebelum mengirim ulang permintaan yang hasilnya belum diketahui. Perintah daya memerlukan konfirmasi, kemudian mengikuti otorisasi dan typed approval backend; UI menunggu laporan worker untuk mengubah status. Wake tidak dibuat-buat: kontrak yang tersedia belum menyediakan endpoint wake client.
 
-Jika Connect gagal, dialog mempertahankan pesan error beserta kode, status HTTP jika tersedia, dan endpoint. Kode pairing dan token yang diketahui disamarkan dari pesan diagnostik. Lihat [diagnosis koneksi](docs/CONNECTION_TROUBLESHOOTING.md) untuk kasus health berhasil tetapi pairing gagal.
+Jika Connect gagal, dialog menampilkan tahap health/bootstrap/tiket/handshake serta mempertahankan pesan error beserta kode, status HTTP jika tersedia, dan endpoint. Pairing yang sudah diterima backend dibedakan dari kegagalan telemetry. Gunakan **Salin laporan koneksi** untuk menyalin identitas build dan hasil diagnostik. Kode pairing dan token yang diketahui disamarkan dari pesan diagnostik. Lihat [analisis koneksi 0.1.3](docs/CONNECTION_ANALYSIS.md) dan [diagnosis koneksi](docs/CONNECTION_TROUBLESHOOTING.md) untuk kasus health berhasil tetapi pairing gagal.
 
 ## Build
 

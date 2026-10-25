@@ -1,18 +1,30 @@
 // Classify known transport failures without displaying raw exception text:
 // native errors may contain URLs, tickets, headers, or request bodies.
-export function transportFailure(error, { timedOut = false, mutation = false, native = false } = {}) {
+export function transportFailure(error, { timedOut = false, mutation = false, native = false, websocket = false } = {}) {
   const raw = typeof error === 'string' ? error : String(error?.message || '');
-  if (/url not allowed|configured scope|denied by.*scope/i.test(raw)) return {
+  const code = error?.code;
+  if (code === 'NATIVE_SCOPE_DENIED' || /url not allowed|configured scope|denied by.*scope/i.test(raw)) return {
     code: 'NATIVE_SCOPE_DENIED', message: 'Izin jaringan aplikasi menolak URL API. Pastikan installer yang digunakan adalah build terbaru.', retryable: false
   };
-  if (/(?:http|websocket)\.[a-z_]+.*not allowed|command.*(?:not allowed|not found)|plugin.*not found/i.test(raw)) return {
+  if (/(?:http|websocket)\.[a-z_]+.*not allowed|(?:backend_request|runtime_info).*not allowed|command.*(?:not allowed|not found)|plugin.*not found/i.test(raw)) return {
     code: 'NATIVE_PERMISSION_DENIED', message: 'Perintah jaringan native tidak tersedia atau tidak diizinkan pada build aplikasi ini.', retryable: false
   };
-  if (/connection refused|actively refused|ECONNREFUSED/i.test(raw)) return {
+  if (code === 'CONNECTION_REFUSED' || /connection refused|actively refused|ECONNREFUSED/i.test(raw)) return {
     code: 'CONNECTION_REFUSED', message: 'Koneksi ke port API ditolak. Periksa service HTTP port 3450, alamat bind, dan firewall server.', retryable: !mutation
   };
+  if (code === 'NETWORK_ACCESS_DENIED') return {
+    code, message: 'OS menolak akses jaringan aplikasi. Periksa aturan firewall untuk aplikasi Hermes.', retryable: false
+  };
+  if (code === 'ROUTE_UNREACHABLE') return {
+    code, message: 'Rute OS menuju VM tidak tersedia. Periksa LAN atau rute subnet Tailscale.', retryable: !mutation
+  };
+  const wsStatus = websocket && /HTTP error:\s*(\d{3})\b/i.exec(raw);
+  if (wsStatus) return {
+    code: 'WS_HTTP_REJECTED', status: Number(wsStatus[1]),
+    message: `Server menolak handshake telemetry (HTTP ${wsStatus[1]}). Periksa tiket WebSocket, subprotokol, dan konfigurasi endpoint telemetry.`, retryable: true
+  };
   const unknownOutcome = mutation ? 'Hasil permintaan belum diketahui; periksa status sebelum mengirim ulang. ' : '';
-  if (timedOut || /timed out|timeout/i.test(raw)) return {
+  if (code === 'TIMEOUT' || timedOut || /timed out|timeout/i.test(raw)) return {
     code: 'TIMEOUT', message: `${unknownOutcome}Batas waktu koneksi API habis. Periksa akses ke port 3450 melalui LAN atau subnet Tailscale.`, retryable: !mutation
   };
   if (!native && /failed to fetch|load failed|networkerror/i.test(raw)) return {

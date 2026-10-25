@@ -23,6 +23,7 @@ class BackendFixture:
         self.seq = 104
         self.health = True
         self.pair_failure = False
+        self.ticket_failure = False
         self.approvals = [{'id': 'fixture-approval', 'title': 'Fixture command', 'request_hash': 'fixture-hash-1', 'request': {'command': 'fixture-only'}}]
         self.nodes = [
             {'id': 'vps', 'name': 'Fixture server', 'os': 'linux', 'lan_ip': '192.168.1.4', 'status': 'online', 'accepting_tasks': True, 'effective_capabilities': ['exec', 'fs'], 'metrics': None, 'metrics_stale': True, 'last_seen_at': '2026-10-25T07:00:00Z', 'active_tools': 0, 'max_parallel_tools': 4, 'wake_supported': False},
@@ -52,6 +53,9 @@ class BackendFixture:
                 value = {'workspace_id': 'fixture-workspace', 'device_id': 'fixture-device', 'last_event_seq': str(self.seq), 'agents': [{'id': 'main', 'name': 'Fixture orchestrator', 'role': 'Planner', 'status': 'idle', 'tools': ['terminal'], 'node_affinity': 'auto', 'instructions': 'Fixture instructions', 'active_direct_session_id': 'fixture-session'}], 'nodes': self.nodes, 'active_missions': self.missions, 'features': {'real_mode': True, 'runtime_ready': True, 'wake_supported': False, 'approvals': True}}
             elif path == '/api/v1/auth/ws-ticket':
                 value = {'ticket': f'fixture-ticket-{len(self.sockets)}', 'subprotocol': 'hermes.telemetry.v1', 'expires_at': '2026-10-25T12:00:00Z'}
+                if self.ticket_failure:
+                    status = 403
+                    value = {'error': {'code': 'TICKET_DENIED', 'message': 'Fixture telemetry ticket denied', 'retryable': False}}
             elif path == '/api/v1/sessions':
                 value = {'items': []} if request.method == 'GET' else {'id': 'fixture-session', 'agent_id': 'main'}
             elif path == '/api/v1/sessions/fixture-session/messages':
@@ -114,7 +118,7 @@ with sync_playwright() as p:
         expect(page.locator('.mission-card')).to_have_count(0)
         assert not backend.requests, 'Unpaired client must not authenticate with old/demo credentials'
         page.get_by_label('Backend status').click()
-        expect(page.get_by_role('dialog')).to_contain_text('0.1.2')
+        expect(page.get_by_role('dialog')).to_contain_text('0.1.3')
         expect(page.get_by_role('dialog')).to_contain_text('Browser fetch + WebSocket')
         page.get_by_role('button', name='Uji API tanpa pairing').click()
         expect(page.locator('#connection-diagnostics')).to_contain_text('API dapat dijangkau')
@@ -132,9 +136,23 @@ with sync_playwright() as p:
         page.get_by_label('Backend status').click()
         expect(page.locator('#connection-diagnostics')).to_contain_text('HTTP 400')
         backend.pair_failure = False
+        backend.ticket_failure = True
         page.locator('#pair-code').fill('A' * 26)
         page.locator('#device-name').fill('Fixture client')
         page.locator('button[form="pair-form"]').click()
+        expect(page.get_by_role('dialog')).to_contain_text('Pairing diterima backend; koneksi workspace/telemetry belum selesai.')
+        expect(page.locator('#connection-diagnostics')).to_contain_text('HTTP 403')
+        expect(page.locator('#connection-stage')).to_have_text('Tiket WebSocket')
+        page.get_by_role('button', name='Uji API tanpa pairing').click()
+        expect(page.locator('#connection-diagnostics')).to_contain_text('API dapat dijangkau')
+        expect(page.locator('#connection-diagnostics')).to_contain_text('HTTP 403')
+        page.get_by_role('button', name='Salin laporan koneksi').click()
+        expect(page.locator('#toast')).to_contain_text('Laporan koneksi disalin')
+        report = page.evaluate('navigator.clipboard.readText()')
+        assert 'HTTP 403' in report and 'fixture-access' not in report and 'fixture-refresh' not in report and 'A' * 26 not in report
+        assert len([r for r in backend.requests if r[1] == '/api/v1/auth/pair']) == 2
+        backend.ticket_failure = False
+        page.get_by_role('button', name='Hubungkan ulang').click()
         expect(page.get_by_label('Backend status')).to_have_text('Terhubung', timeout=10000)
 
         # A changed request hash must never be approved using a modal that

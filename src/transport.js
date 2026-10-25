@@ -7,8 +7,20 @@ export const NETWORK = Object.freeze({ server: '192.168.1.4', pc: '192.168.1.26'
 
 export async function httpFetch(url, options) {
   if (isTauri()) {
-    const { fetch } = await import('@tauri-apps/plugin-http');
-    return fetch(url, { ...options, maxRedirections: 0, connectTimeout: 5000 });
+    if (options.signal?.aborted) throw new DOMException('Request aborted', 'AbortError');
+    const headers = Array.from(new Headers(options.headers || {}).entries());
+    let abort;
+    const cancelled = new Promise((_, reject) => {
+      abort = () => reject(new DOMException('Request aborted', 'AbortError'));
+      options.signal?.addEventListener('abort', abort, { once: true });
+    });
+    try {
+      const response = await Promise.race([
+        invoke('backend_request', { request: { url, method: options.method || 'GET', headers, body: options.body ?? null } }),
+        cancelled
+      ]);
+      return new Response([101, 103, 204, 205, 304].includes(response.status) ? null : response.body, { status: response.status });
+    } finally { options.signal?.removeEventListener('abort', abort); }
   }
   return fetch(url, { ...options, redirect: 'error', credentials: 'omit' });
 }
@@ -33,19 +45,25 @@ export async function openSocket(url, protocol, handlers) {
     let socket;
     try {
       socket = await Promise.race([connection, new Promise((_, reject) => {
-        deadline = setTimeout(() => { expired = true; active = false; reject(new Error('Telemetry tidak merespons.')); }, 10000);
+        deadline = setTimeout(() => { expired = true; active = false; reject(Object.assign(new Error('Telemetry tidak merespons.'), { code: 'TIMEOUT' })); }, 10000);
       })]);
     } finally { clearTimeout(deadline); }
     return { send: text => socket.send(text), close: async () => { active = false; await socket.disconnect(); } };
   }
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(url, protocol);
-    const timer = setTimeout(() => { socket.close(); reject(new Error('Telemetry tidak merespons.')); }, 10000);
+    let opened = false;
+    const timer = setTimeout(() => { socket.close(); reject(Object.assign(new Error('Telemetry tidak merespons.'), { code: 'TIMEOUT' })); }, 10000);
     socket.onmessage = event => handlers.message(event.data);
-    socket.onclose = () => { clearTimeout(timer); handlers.close(); };
+    socket.onclose = () => {
+      clearTimeout(timer);
+      if (!opened) reject(new Error('Telemetry ditutup sebelum handshake selesai.'));
+      else handlers.close();
+    };
     socket.onerror = () => { clearTimeout(timer); reject(new Error('Telemetry tidak dapat dihubungi.')); };
     socket.onopen = () => {
       clearTimeout(timer);
+      opened = true;
       resolve({ send: text => socket.send(text), close: () => socket.close() });
     };
   });
