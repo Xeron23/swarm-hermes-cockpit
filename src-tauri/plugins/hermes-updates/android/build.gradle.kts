@@ -19,6 +19,7 @@ android {
 }
 kotlin { compilerOptions { jvmTarget = JvmTarget.JVM_1_8 } }
 dependencies {
+    implementation("androidx.activity:activity:1.9.3")
     implementation("androidx.core:core-ktx:1.9.0")
     implementation("com.fasterxml.jackson.core:jackson-databind:2.15.3")
     implementation(project(":tauri-android"))
