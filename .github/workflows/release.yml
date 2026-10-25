@@ -13,7 +13,6 @@ permissions:
 jobs:
   build-windows:
     name: Build Windows Desktop (x86_64)
-    if: false
     runs-on: windows-latest
     steps:
       - name: Checkout repository
@@ -33,16 +32,28 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Build and Package Tauri Windows App
-        uses: tauri-apps/tauri-action@v0
+      - name: Build Frontend Web
+        run: npm run web:build
+
+      - name: Build Tauri Windows App
+        run: npx tauri build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tagName: v__VERSION__
-          releaseName: 'Hermes Cockpit v__VERSION__'
-          releaseBody: 'Production release for Hermes Cockpit Desktop (Windows Installer) and Mobile (Android APK).'
-          releaseDraft: false
-          prerelease: false
+
+      - name: Create or Update GitHub Release and Upload Windows Artifacts
+        run: |
+          $TAG_NAME = $env:GITHUB_REF -replace 'refs/tags/', ''
+          if (-not $TAG_NAME -or $TAG_NAME -eq 'refs/heads/main') {
+            $TAG_NAME = 'v0.1.1'
+          }
+          Write-Host "Target Release Tag: $TAG_NAME"
+          try { gh release view $TAG_NAME } catch { gh release create $TAG_NAME --title "Hermes Cockpit $TAG_NAME" --notes "Production release for Windows & Android with full backend integration." }
+          Get-ChildItem -Path src-tauri\target\release\bundle\msi\*.msi, src-tauri\target\release\bundle\nsis\*.exe | ForEach-Object {
+            Write-Host "Uploading $_"
+            gh release upload $TAG_NAME $_.FullName --clobber
+          }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-android:
     name: Build Android APK

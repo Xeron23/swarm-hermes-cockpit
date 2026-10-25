@@ -154,7 +154,21 @@ function pairDialog(){
   );
 }
 
-function about(){openSheet('Meet your mission control','Hermes · Demo app',`<div style="margin-bottom:23px">${brand}</div><p>Kelola agent fleet, pantau komunikasi antar agen, dan arahkan eksekusi ke VPS atau Windows PC dari satu tampilan mobile.</p><div class="sheet-section-title">${icon('bolt')}Try the prototype</div>${[['New mission','Buat misi dan pilih node tujuan.'],['Agent workspaces','Buka chat terpisah untuk setiap agen.'],['Swarm feed','Ketuk event untuk melihat trace, payload, dan token.'],['Execution nodes','Periksa metrik dan coba kontrol daya PC.']].map(([a,b])=>`<div class="milestone"><span class="step-icon">${icon('check')}</span><div><strong>${a}</strong><small>${b}</small></div></div>`).join('')}<div class="notice">Aplikasi ini berjalan dalam mode demo. Percakapan, telemetry, terminal, dan kontrol perangkat menggunakan data simulasi. Riwayat demo disimpan secara lokal di perangkat ini.</div>`,`<button class="secondary-button" data-action="reset-demo">Reset demo</button><button class="primary-button" data-action="close">Explore Hermes ${icon('arrow')}</button>`)}
+function about(){
+  const isPaired = !!hermesApi.accessToken;
+  openSheet('Hermes Mission Control', isPaired ? 'Connected to Dual-Node Swarm' : 'Client Mode', `
+    <div style="margin-bottom:23px">${brand}</div>
+    <p>Mission Control terdistribusi untuk mengoordinasikan agen AI dan mengarahkan eksekusi ke VPS (Linux) atau Windows PC.</p>
+    <div class="sheet-section-title">${icon('bolt')}Status Lingkungan</div>
+    <div class="detail-grid">
+      <div class="detail-block"><span>Backend Host</span><strong>${esc(hermesApi.baseUrl)}</strong></div>
+      <div class="detail-block"><span>Koneksi</span><strong class="${isPaired?'mint':''}">${isPaired?'Online / Paired':'Not paired'}</strong></div>
+      <div class="detail-block"><span>Workspace</span><strong>${hermesApi.workspaceId ? esc(hermesApi.workspaceId.slice(0,8))+'...' : '—'}</strong></div>
+      <div class="detail-block"><span>Device ID</span><strong>${hermesApi.deviceId ? esc(hermesApi.deviceId.slice(0,8))+'...' : '—'}</strong></div>
+    </div>
+    <div class="notice">${isPaired ? 'Perangkat terhubung penuh ke queue durable PostgreSQL dan streaming telemetry.' : 'Silakan klik CONNECT di pojok kanan atas untuk memasukkan Pairing Code.'}</div>
+  `, `<button class="secondary-button" data-action="pair-dialog">${icon('settings')}${isPaired?'Connection Settings':'Connect Backend'}</button><button class="primary-button" data-action="close">Done</button>`);
+}
 function notifications(){openSheet('Notifications','Recent activity in your workspace',state.feed.slice(0,4).map(feedItem).join(''),`<button class="primary-button" data-action="navigate" data-page="swarm">Open swarm feed ${icon('arrow')}</button>`)}
 function chatReply(id,text,node){const lower=text.toLowerCase();if(node==='pc'&&state.pcState!=='online')return 'Windows PC sedang '+(state.pcState==='sleep'?'sleep':'offline')+'. Bangunkan node melalui Nodes → Windows PC → Wake on LAN, lalu kirim kembali task ini. Task belum dieksekusi.';if(id==='main')return `Misi diterima. Rencana demo saya:\n\n1. Researcher menyiapkan konteks dan kebutuhan.\n2. Coder mengerjakan implementasi di ${node==='pc'?'Windows PC':'VPS'}.\n3. QA memeriksa hasil dan pengujian.\n4. DevOps memverifikasi service.\n\nHandoff contoh sudah ditambahkan ke Swarm feed. Gunakan New mission untuk melacak milestone-nya.`;if(id==='coder')return /test|pengujian|hasil/.test(lower)?'Hasil pengujian contoh: 12 passed, 0 failed dalam 2.84 detik. Exit code 0.\n\nPerubahan sudah diteruskan ke QA untuk code review. Buka execution console untuk memeriksa terminal dan file diff.':`Task diterima untuk ${node==='pc'?'Windows PC (192.168.1.26)':'VPS (webserver-xeron)'}.\n\nPada alur demo ini, saya menyiapkan workspace, menjalankan build, lalu memvalidasi hasilnya. Build contoh selesai dengan exit code 0. Detail dapat Anda lihat di execution console.`;if(id==='devops')return /log|3450/.test(lower)?'Log contoh hermes-cockpit :3450:\n\n[INFO] Application startup complete\n[INFO] GET /health → 200 OK\n[INFO] Agent bridge connected\n[INFO] Task queue healthy\n\nTidak ada error pada cuplikan log demo ini.':'Health check demo selesai:\n\nVPS · CPU 42% · RAM 64% · Disk 32%\nUptime 14d 8h · Ping 21 ms\n\nPC · CPU 18% · RAM 38% · Disk 46%\nUptime 6h 42m · Ping 4 ms\n\nBuka Nodes untuk detail metrik dan kontrol daya.';if(id==='researcher')return 'Saya sudah menyiapkan alur pencarian demo:\n\n1. Telusuri referensi yang sesuai dengan permintaan Anda.\n2. Cari konteks terkait di Obsidian Brain.\n3. Susun ringkasan, sumber, dan rekomendasi.\n\nPada prototipe ini belum ada pencarian web atau akses vault sungguhan; hasil dan handoff yang tampil adalah contoh.';return 'Review demo selesai.\n\n✓ Acceptance criteria tervalidasi\n✓ 12 automated tests passed\n✓ Signature validation tersedia\n✓ Tidak ada temuan pada security scan contoh\n\nHasil review telah diteruskan ke Main melalui Swarm feed.'}
 async function sendChat(text){
@@ -178,7 +192,19 @@ async function sendChat(text){
         sessId = newSess.id;
         state.sessionIds[id] = sessId;
       }
-      await hermesApi.sendMessage(sessId, text, { target_node: node });
+      const accepted = await hermesApi.sendMessage(sessId, text, { target_node: node });
+      state.chatBusy[id] = true;
+      if (accepted?.task?.id) {
+        addFeed({
+          from: 'user',
+          to: id,
+          text: `Task dispatched to ${getAgent(id).name}: "${text.slice(0, 80)}"`,
+          tag: `Task #${accepted.task.id.slice(0,8)}`,
+          type: 'handoff',
+          node,
+          tokens: 450
+        });
+      }
     } else {
       // Fallback demo response if not paired yet
       setTimeout(()=>{
@@ -315,6 +341,19 @@ async function initBackendTelemetry() {
           state.pcState = bn.status === 'online' ? 'online' : 'offline';
         }
       }
+    }
+    // Fetch initial active mission from backend
+    if (bootstrap.active_missions && bootstrap.active_missions.length > 0) {
+      const bm = bootstrap.active_missions[0];
+      state.mission = {
+        title: bm.title,
+        prompt: bm.prompt,
+        node: bm.requested_node || 'vps',
+        id: bm.id ? bm.id.slice(0, 8) : 'MSN-024',
+        stage: Math.max(1, Math.round(bm.progress_percent / 20)),
+        paused: bm.status === 'paused',
+        description: `Backend status: ${bm.status}`
+      };
     }
     // Fetch initial swarm events from backend
     try {
