@@ -1,6 +1,6 @@
 [package]
-name = "hermes-cockpit"
-version = "0.1.0"
+name = "hermes-cockpit-tauri"
+version = "0.1.1"
 description = "Hermes multi-agent mission control demo"
 edition = "2021"
 rust-version = "1.90"

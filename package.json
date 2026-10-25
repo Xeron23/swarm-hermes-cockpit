@@ -1,6 +1,6 @@
 {
   "name": "hermes-cockpit-tauri",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "Hermes multi-agent mission control \u2014 Tauri v2 demo application",

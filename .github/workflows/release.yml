@@ -86,8 +86,16 @@ jobs:
           npx tauri android init --ci
           npx tauri android build --apk --debug --target aarch64
 
-      - name: Upload APK to Release
+      - name: Create or Update GitHub Release and Upload APK
         run: |
-          gh release upload v0.1.0 src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk --clobber
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          if [ -z "$TAG_NAME" ] || [ "$TAG_NAME" = "refs/heads/main" ]; then
+            TAG_NAME="v0.1.1"
+          fi
+          echo "Target Release Tag: $TAG_NAME"
+          # Create release if it doesn't exist
+          gh release view "$TAG_NAME" || gh release create "$TAG_NAME" --title "Hermes Cockpit $TAG_NAME" --notes "Production release with full backend connectivity (FastAPI + PostgreSQL + WebSocket telemetry)."
+          # Upload Android APK
+          gh release upload "$TAG_NAME" src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
