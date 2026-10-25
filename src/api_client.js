@@ -2,6 +2,7 @@ import { SERVER_URL, httpFetch, openSocket } from './transport.js';
 import { isTauri } from '@tauri-apps/api/core';
 import { transportFailure, redactDiagnostic } from './diagnostics.js';
 import { normalizePairingCode, pairingCodeError } from './pairing.js';
+import { loadSession, saveSession, clearSession, checkStorageReady, AUTH_KEY } from './session_storage.js';
 
 export class ApiError extends Error {
   constructor(message, { status = 0, code = 'NETWORK_ERROR', retryable = false, details = {}, endpoint, method } = {}) {
@@ -9,7 +10,7 @@ export class ApiError extends Error {
     Object.assign(this, { name: 'ApiError', status, code, retryable, details, endpoint, method });
   }
 }
-const AUTH_KEY = 'hermes_auth_v2';
+export { AUTH_KEY };
 export const items = value => {
   if (Array.isArray(value)) return value;
   if (Array.isArray(value?.items)) return value.items;
@@ -27,14 +28,18 @@ export class HermesApiClient {
     this.baseUrl = baseUrl.replace(/\/$/, '');
     Object.assign(this, { storage, fetcher, socketFactory, timeout, retryDelay });
     this.auth = null;
+    this.sessionStatus = 'missing';
+    this.sessionPersistence = 'unwritten';
     this.lastEventSeq = '0';
     this.generation = 0;
     this.authEpoch = 0;
     this.seen = new Set();
-    try {
-      const saved = JSON.parse(storage?.getItem(AUTH_KEY) || 'null');
-      if (saved?.server === this.baseUrl && saved.access_token && saved.refresh_token) this.auth = saved;
-    } catch { /* Old demo caches are not workspace snapshots. */ }
+    const result = loadSession(this.baseUrl, this.storage);
+    this.sessionStatus = result.status;
+    if (result.status === 'valid' && result.session) {
+      this.auth = result.session;
+      this.sessionPersistence = 'saved';
+    }
   }
   get accessToken() { return this.auth?.access_token || null; }
   get workspaceId() { return this.auth?.workspace_id || null; }
@@ -44,18 +49,19 @@ export class HermesApiClient {
       throw new ApiError('Respons autentikasi tidak lengkap.', { code: 'INVALID_RESPONSE' });
     }
     this.auth = { ...value, server: this.baseUrl };
-    try { this.storage?.setItem(AUTH_KEY, JSON.stringify(this.auth)); } catch { /* Current session still works. */ }
+    const saved = saveSession(this.auth, this.storage);
+    this.sessionPersistence = saved.status || (saved.ok ? 'saved' : 'write_failed');
+    this.sessionStatus = saved.ok ? 'valid' : 'write_failed';
   }
   clearTokens() {
     this.authEpoch++;
     this.stopTelemetry();
     this.auth = null;
+    this.sessionStatus = 'missing';
+    this.sessionPersistence = 'unwritten';
     this.lastEventSeq = '0';
     this.seen.clear();
-    try {
-      this.storage?.removeItem(AUTH_KEY);
-      for (const name of ['hermes_access_token', 'hermes_refresh_token', 'hermes_workspace_id', 'hermes_device_id']) this.storage?.removeItem(name);
-    } catch { /* Memory is already cleared. */ }
+    clearSession(this.storage);
   }
   async raw(endpoint, options = {}, authenticated = true) {
     const controller = new AbortController();
@@ -123,6 +129,10 @@ export class HermesApiClient {
     return this.refreshing;
   }
   async pair(pairingCode, deviceName) {
+    const ready = checkStorageReady(this.storage);
+    if (!ready.ready && ready.reason === 'STORAGE_WRITE_FAILED') {
+      // Storage write failed probe
+    }
     const code = normalizePairingCode(pairingCode);
     const invalid = pairingCodeError(code);
     if (invalid) throw new ApiError(invalid, { code: 'INVALID_PAIRING_CODE' });
@@ -147,6 +157,7 @@ export class HermesApiClient {
   getMessages(id) { return this.request(`/api/v1/sessions/${encodeURIComponent(id)}/messages`); }
   sendMessage(id, content, target) { return this.request(`/api/v1/sessions/${encodeURIComponent(id)}/messages`, { method: 'POST', body: JSON.stringify({ content, execution: { target_node: target } }) }); }
   getMissions() { return this.request('/api/v1/missions'); }
+  getMission(id) { return this.request(`/api/v1/missions/${encodeURIComponent(id)}`); }
   createMission(title, prompt, target) { return this.request('/api/v1/missions', { method: 'POST', body: JSON.stringify({ title, prompt, project_id: null, execution: { target_node: target }, token_budget: 200000 }) }); }
   missionAction(id, action) {
     if (!['pause', 'resume', 'cancel'].includes(action)) throw new Error('Invalid mission action');

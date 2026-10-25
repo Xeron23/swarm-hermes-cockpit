@@ -7,10 +7,11 @@ import { BUILD_INFO } from './build_info.js';
 import { normalizePairingInput } from './pairing.js';
 import { AppUpdater } from './app_updater.js';
 import { updateBody, updateFooter } from './update_views.js';
+import { themeManager } from './theme_manager.js';
 
 const workspace = new Workspace(api);
 const updater = new AppUpdater();
-const ui = { page: 'overview', agentId: null, sessionId: null, agentFilter: 'all', eventFilter: 'all', target: 'auto', draft: '', error: '', pending: new Set(), logTraceId: null, connectionDiagnostic: '' };
+const ui = { page: 'overview', agentId: null, sessionId: null, agentFilter: 'all', eventFilter: 'all', target: 'auto', draft: '', error: '', pending: new Set(), logTraceId: null, connectionDiagnostic: '', themePanelOpen: false, missionDetailId: null };
 let logTimer;
 function notify(message) {
   $('#toast').textContent = message;
@@ -145,6 +146,25 @@ document.addEventListener('click', event => {
   if (action === 'connection') { connection(); return; }
   if (action === 'app-updates') { appUpdates(); return; }
   if (action === 'inbox') { inbox(); return; }
+  if (action === 'theme-panel') { ui.themePanelOpen = true; paint(); return; }
+  if (action === 'theme-dismiss') { ui.themePanelOpen = false; paint(); return; }
+  if (action === 'theme-select') { const themeId = button.dataset.themeId; if (themeId) themeManager.setTheme(themeId); paint(); return; }
+  if (action === 'theme-reset') { themeManager.setTheme('ocean-mist'); paint(); return; }
+  if (action === 'sheet-dismiss') { if (ui.missionDetailId) { ui.missionDetailId = null; paint(); return; } }
+  if (action === 'mission-detail') {
+    const missionId = button.dataset.missionId || id;
+    ui.missionDetailId = missionId;
+    paint();
+    if (api.getMission) {
+      api.getMission(missionId).then(detail => {
+        if (detail && ui.missionDetailId === missionId) {
+          workspace.state.missionDetailsById[missionId] = detail;
+          paint();
+        }
+      }).catch(() => {});
+    }
+    return;
+  }
   if (action === 'agent-filter') { ui.agentFilter = button.dataset.filter; paint(); return; }
   if (action === 'event-filter') { ui.eventFilter = button.dataset.filter; paint(); return; }
   run(action, async () => {

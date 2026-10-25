@@ -32,7 +32,7 @@ export function createUpdateFeed({ files, metadata, repository, run, attempt, da
   };
 }
 
-export function publishPublicRelease({ directory, metadata, config, run, attempt, gh = args => spawnSync('gh', args, { encoding: 'utf8', env: { ...process.env, GH_TOKEN: process.env.PUBLIC_RELEASE_TOKEN } }) }) {
+export function publishPublicRelease({ directory, metadata, config, run, attempt, gh = args => spawnSync('gh', args, { encoding: 'utf8', env: { ...process.env, GH_TOKEN: process.env.PUBLIC_RELEASE_TOKEN || process.env.GH_TOKEN || process.env.GITHUB_TOKEN } }) }) {
   const repository = config.repository;
   if (!/^[\w.-]+\/[\w.-]+$/.test(repository) || config.channelTag !== 'updates') throw new Error('Invalid public updater repository/channel');
   let files = prepareArtifacts(directory);

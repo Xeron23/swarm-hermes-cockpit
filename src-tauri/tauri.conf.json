@@ -21,8 +21,8 @@
         "minHeight": 640,
         "resizable": true,
         "center": true,
-        "backgroundColor": "#192e38",
-        "theme": "Dark"
+        "backgroundColor": "#F2EFE7",
+        "theme": "Light"
       }
     ],
     "security": {
@@ -52,7 +52,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEMzMDJCNjk5NTlEMkZFQUIKUldTci90SlptYllDd3pOYXpiODlaZThTK0hrSjcwQXFzSnU0cUtxdDRTd2NNYWJCK3pWd1F1Tm0K",
       "endpoints": [
-        "https://github.com/Xeron23/hermes-cockpit-releases/releases/download/updates/latest.json"
+        "https://github.com/Xeron23/swarm-hermes-cockpit/releases/download/updates/latest.json"
       ],
       "requireSignedVersion": true,
       "windows": {

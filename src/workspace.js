@@ -1,5 +1,6 @@
 import { items, sequence, compareSequence, ApiError } from './api_client.js';
 import { formatApiError } from './diagnostics.js';
+import { selectActiveMissions, selectMissionHistory, normalizeMission } from './mission_model.js';
 
 export const senderId = value => String(value || '').replace(/^(agent|node|user):/, '');
 export function metricRows(node) {
@@ -24,7 +25,7 @@ export class Workspace {
     this.epoch = 0;
   }
   empty() {
-    return { status: this.api?.accessToken ? 'connecting' : 'unpaired', connectionStage: null, workspaceId: null, error: '', updatedAt: null, nodes: [], agents: [], missions: [], sessions: [], messages: {}, events: [], features: {}, approvals: [], questions: [], sectionErrors: {} };
+    return { status: this.api?.accessToken ? 'connecting' : 'unpaired', connectionStage: null, workspaceId: null, error: '', updatedAt: null, nodes: [], agents: [], missions: [], activeMissions: [], missionHistory: [], missionDetailsById: {}, sessions: [], messages: {}, events: [], features: {}, approvals: [], questions: [], sectionErrors: {} };
   }
   subscribe(listener) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   emit() { for (const listener of this.listeners) listener(this.state); }
@@ -40,7 +41,16 @@ export class Workspace {
       throw new ApiError('Snapshot workspace tidak sesuai identitas perangkat atau kontrak API.', { code: 'INVALID_SNAPSHOT', endpoint: '/api/v1/bootstrap', method: 'GET' });
     }
     if (resetCursor && sequence(value.last_event_seq) === null) throw new ApiError('Cursor event server tidak valid.', { code: 'INVALID_SNAPSHOT', endpoint: '/api/v1/bootstrap', method: 'GET' });
-    Object.assign(this.state, { workspaceId: value.workspace_id, nodes: value.nodes, agents: value.agents, missions: value.active_missions, features: value.features || {}, updatedAt: new Date().toISOString() });
+    Object.assign(this.state, {
+      workspaceId: value.workspace_id,
+      nodes: value.nodes,
+      agents: value.agents,
+      missions: value.active_missions,
+      activeMissions: selectActiveMissions(value.active_missions),
+      missionHistory: selectMissionHistory(value.active_missions),
+      features: value.features || {},
+      updatedAt: new Date().toISOString()
+    });
     if (resetCursor) this.api.lastEventSeq = value.last_event_seq;
     this.emit();
   }
@@ -51,7 +61,14 @@ export class Workspace {
       try {
         const value = await call();
         if (epoch !== this.epoch) return;
-        this.state[name] = items(value);
+        const resultItems = items(value);
+        if (name === 'missions') {
+          this.state.missions = resultItems;
+          this.state.activeMissions = selectActiveMissions(resultItems);
+          this.state.missionHistory = selectMissionHistory(resultItems);
+        } else {
+          this.state[name] = resultItems;
+        }
         delete this.state.sectionErrors[name];
       } catch (error) {
         if (epoch !== this.epoch) return;
