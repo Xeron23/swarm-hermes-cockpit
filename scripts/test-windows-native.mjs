@@ -24,11 +24,31 @@ export function findManifestTool(env = process.env) {
   throw new Error('Windows SDK mt.exe was not found; a manifest is required before native unit tests can start.');
 }
 
+function manifestXml(bytes) {
+  return (bytes[0] === 0xff && bytes[1] === 0xfe ? bytes.subarray(2).toString('utf16le') : bytes.toString('utf8')).replace(/<!--[\s\S]*?-->/g, '');
+}
+
+export function hasTestAssemblyIdentity(bytes) {
+  // The first child defines this EXE. A nested dependentAssembly identity
+  // defines a dependency and cannot satisfy mt.exe's definition requirement.
+  const identity = /^\s*(?:<\?xml[^?]*\?>\s*)?<(?:[\w.-]+:)?assembly\b[^>]*>\s*<(?:[\w.-]+:)?assemblyIdentity\b([^>]*)>/i.exec(manifestXml(bytes));
+  if (!identity) return false;
+  const attributes = Object.fromEntries(Array.from(identity[1].matchAll(/([\w.-]+)\s*=\s*(["'])(.*?)\2/g), match => [match[1], match[3]]));
+  const version = attributes.version?.split('.');
+  return attributes.type === 'win32' && Boolean(attributes.name?.trim()) && attributes.processorArchitecture === 'amd64'
+    && version?.length === 4 && version.every(part => /^\d+$/.test(part) && Number(part) <= 65535);
+}
+
 export function hasCommonControlsV6(bytes) {
-  const xml = (bytes[0] === 0xff && bytes[1] === 0xfe ? bytes.subarray(2).toString('utf16le') : bytes.toString('utf8')).replace(/<!--[\s\S]*?-->/g, '');
-  return (xml.match(/<(?:[\w.-]+:)?assemblyIdentity\b[^>]*>/g) || []).some(identity =>
+  const xml = manifestXml(bytes);
+  return (xml.match(/<(?:[\w.-]+:)?dependentAssembly\b[^>]*>\s*<(?:[\w.-]+:)?assemblyIdentity\b[^>]*>/g) || []).some(identity =>
     /\bname\s*=\s*(["'])Microsoft\.Windows\.Common-Controls\1/.test(identity)
     && /\bversion\s*=\s*(["'])6\.0\.0\.0\1/.test(identity));
+}
+
+export function validateTestManifest(bytes) {
+  if (!hasTestAssemblyIdentity(bytes)) throw new Error('Native test manifest is missing a valid x64 assembly definition identity.');
+  if (!hasCommonControlsV6(bytes)) throw new Error('Native test manifest must request Common Controls v6.');
 }
 
 export function testWindowsNative({ cwd = process.cwd(), env = process.env, run = spawnSync, manifestTool, log = text => process.stdout.write(text) } = {}) {
@@ -37,6 +57,11 @@ export function testWindowsNative({ cwd = process.cwd(), env = process.env, run 
     if (result.error) throw result.error;
     return result;
   };
+  const manifest = path.join(cwd, 'src-tauri/windows-test.manifest');
+  validateTestManifest(readFileSync(manifest));
+  const mt = manifestTool || findManifestTool(env);
+  const validate = invoke(mt, ['-nologo', '-manifest', manifest, '-validate_manifest']);
+  if (validate.status !== 0) throw new Error('Windows SDK rejected the native test manifest.');
   const build = invoke('cargo', ['test', '--release', '--lib', '--manifest-path', 'src-tauri/Cargo.toml', '--offline', '--locked', '--no-run', '--message-format=json'], true);
   const executables = new Set();
   for (const line of (build.stdout || '').split(/\r?\n/).filter(Boolean)) {
@@ -47,11 +72,6 @@ export function testWindowsNative({ cwd = process.cwd(), env = process.env, run 
   }
   if (build.status !== 0) throw new Error(`Native test compilation failed (exit ${build.status}).`);
   if (!executables.size) throw new Error('Cargo did not produce a library unit test executable; refusing to skip native tests.');
-  const manifest = path.join(cwd, 'src-tauri/windows-test.manifest');
-  if (!hasCommonControlsV6(readFileSync(manifest))) throw new Error('Native test manifest must request Common Controls v6.');
-  const mt = manifestTool || findManifestTool(env);
-  const validate = invoke(mt, ['-nologo', '-manifest', manifest, '-validate_manifest']);
-  if (validate.status !== 0) throw new Error('Windows SDK rejected the native test manifest.');
   const directory = mkdtempSync(path.join(tmpdir(), 'hermes-native-test-manifests-'));
   try {
     let index = 0;
@@ -63,9 +83,8 @@ export function testWindowsNative({ cwd = process.cwd(), env = process.env, run 
       if (embed.status !== 0) throw new Error('Could not embed the native test manifest.');
       const extracted = path.join(directory, `${index++}.manifest`);
       const extract = invoke(mt, ['-nologo', `-inputresource:${executable};#1`, `-out:${extracted}`]);
-      if (extract.status !== 0 || !existsSync(extracted) || !hasCommonControlsV6(readFileSync(extracted))) {
-        throw new Error('Native test EXE is missing the verified Common Controls v6 manifest.');
-      }
+      if (extract.status !== 0 || !existsSync(extracted)) throw new Error('Could not extract the native test EXE manifest.');
+      validateTestManifest(readFileSync(extracted));
       log(`Running native tests with Common Controls v6: ${path.basename(executable)}\n`);
       const tests = invoke(executable, ['--nocapture']);
       if (tests.status !== 0) {

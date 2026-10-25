@@ -4,10 +4,10 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { findManifestTool, hasCommonControlsV6, testWindowsNative } from './test-windows-native.mjs';
+import { findManifestTool, hasCommonControlsV6, hasTestAssemblyIdentity, validateTestManifest, testWindowsNative } from './test-windows-native.mjs';
 
 const manifestSource = fileURLToPath(new URL('../src-tauri/windows-test.manifest', import.meta.url));
-function fixture(t, { buildStatus = 0, embedStatus = 0, testsStatus = 0, validExtraction = true, artifacts = true } = {}) {
+function fixture(t, { buildStatus = 0, validateStatus = 0, embedStatus = 0, testsStatus = 0, validExtraction = true, missingExtractedIdentity = false, artifacts = true } = {}) {
   const cwd = mkdtempSync(path.join(tmpdir(), 'hermes windows ci '));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   mkdirSync(path.join(cwd, 'src-tauri'));
@@ -23,6 +23,7 @@ function fixture(t, { buildStatus = 0, embedStatus = 0, testsStatus = 0, validEx
     assert.equal(options.env, env);
     calls.push({ command, args });
     if (command === 'cargo') {
+      assert.ok(calls[0].args.includes('-validate_manifest'), 'SDK must validate the manifest before compiling Rust');
       assert.ok(args.includes('--no-run'));
       assert.ok(args.includes('--offline') && args.includes('--locked'));
       return { status: buildStatus, stdout: [
@@ -32,11 +33,11 @@ function fixture(t, { buildStatus = 0, embedStatus = 0, testsStatus = 0, validEx
       ].join('\n') };
     }
     if (command === mt) {
-      if (args.includes('-validate_manifest')) return { status: 0 };
+      if (args.includes('-validate_manifest')) return { status: validateStatus };
       if (args.includes(`-outputresource:${executable};#1`)) return { status: embedStatus };
       assert.ok(args.includes(`-inputresource:${executable};#1`));
       const output = args.find(value => value.startsWith('-out:')).slice(5);
-      const source = readFileSync(manifestSource, 'utf8');
+      const source = missingExtractedIdentity ? withoutDefinition(readFileSync(manifestSource, 'utf8')) : readFileSync(manifestSource, 'utf8');
       writeFileSync(output, validExtraction ? source : source.replace('version="6.0.0.0"', 'version="5.0.0.0"'));
       return { status: 0 };
     }
@@ -55,15 +56,16 @@ test('native unit test EXEs receive and verify Common Controls v6 before executi
   assert.equal(f.calls.length, 5);
   assert.match(f.logs.join(''), /Common Controls v6/);
 });
+const withoutDefinition = source => source.replace(/<assemblyIdentity\b[^>]*\/\s*>/, '');
 test('native test compilation failures stop before patching or executing an EXE', t => {
   const f = fixture(t, { buildStatus: 101 });
   assert.throws(f.execute, /compilation failed/);
-  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls.length, 2);
 });
 test('missing Cargo library test artifacts are never treated as successful validation', t => {
   const f = fixture(t, { artifacts: false });
   assert.throws(f.execute, /did not produce/);
-  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls.length, 2);
 });
 test('a failed manifest embedding stops native test execution', t => {
   const f = fixture(t, { embedStatus: 1 });
@@ -72,7 +74,7 @@ test('a failed manifest embedding stops native test execution', t => {
 });
 test('a missing Common Controls v6 dependency in the embedded manifest stops native test execution', t => {
   const f = fixture(t, { validExtraction: false });
-  assert.throws(f.execute, /missing the verified/);
+  assert.throws(f.execute, /must request Common Controls/);
   assert.equal(f.calls.filter(call => call.command === f.executable).length, 0);
 });
 test('native test crashes keep their Windows NTSTATUS and remain fatal to publication', t => {
@@ -81,9 +83,32 @@ test('native test crashes keep their Windows NTSTATUS and remain fatal to public
 });
 test('manifest verification handles SDK UTF-16 output and ignores commented declarations', () => {
   const source = readFileSync(manifestSource);
+  assert.equal(hasTestAssemblyIdentity(source), true);
   assert.equal(hasCommonControlsV6(source), true);
+  assert.doesNotThrow(() => validateTestManifest(source));
   assert.equal(hasCommonControlsV6(Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(source.toString(), 'utf16le')])), true);
+  assert.equal(hasTestAssemblyIdentity(Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(source.toString(), 'utf16le')])), true);
   assert.equal(hasCommonControlsV6(Buffer.from(`<!--${source.toString()}-->`)), false);
+});
+test('the previous dependency-only manifest is rejected before SDK invocation or Rust compilation', t => {
+  const f = fixture(t);
+  const previous = Buffer.from(withoutDefinition(readFileSync(manifestSource, 'utf8')));
+  assert.equal(hasCommonControlsV6(previous), true);
+  assert.equal(hasTestAssemblyIdentity(previous), false);
+  writeFileSync(path.join(f.cwd, 'src-tauri/windows-test.manifest'), previous);
+  assert.throws(f.execute, /assembly definition identity/);
+  assert.equal(f.calls.length, 0);
+});
+test('SDK manifest validation errors stop before the expensive Rust compilation', t => {
+  const f = fixture(t, { validateStatus: 1 });
+  assert.throws(f.execute, /Windows SDK rejected/);
+  assert.equal(f.calls.length, 1);
+  assert.ok(f.calls[0].args.includes('-validate_manifest'));
+});
+test('the embedded EXE must retain its assembly definition as well as the dependency', t => {
+  const f = fixture(t, { missingExtractedIdentity: true });
+  assert.throws(f.execute, /assembly definition identity/);
+  assert.equal(f.calls.filter(call => call.command === f.executable).length, 0);
 });
 test('SDK tool discovery honors PATH and otherwise selects the newest installed x64 SDK', t => {
   const directory = mkdtempSync(path.join(tmpdir(), 'hermes sdk '));
