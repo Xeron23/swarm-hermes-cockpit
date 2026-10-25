@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { appendFileSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
@@ -25,13 +25,27 @@ export function prepareArtifacts(directory) {
   for (const extension of ['.msi', '.exe', '.apk']) {
     if (!names.some(name => name.toLowerCase().endsWith(extension))) throw new Error(`Missing required release artifact: ${extension}`);
   }
-  const sums = names.map(name => {
-    const file = path.join(directory, name);
-    if (!statSync(file).size) throw new Error(`Empty artifact: ${name}`);
-    return `${createHash('sha256').update(readFileSync(file)).digest('hex')}  ${name}\n`;
-  }).join('');
+  const seen = new Map();
+  const assets = names.map(original => {
+    if (!statSync(path.join(directory, original)).size) throw new Error(`Empty artifact: ${original}`);
+    // GitHub may rename spaces/special characters during upload, and gh treats
+    // '#' as a label separator. Stage safe names BEFORE checksumming/uploading.
+    const name = original.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[._-]+|[._-]+$/g, '');
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*\.(msi|exe|apk)$/i.test(name)) throw new Error(`Invalid artifact filename: ${original}`);
+    const key = name.toLowerCase();
+    if (seen.has(key)) throw new Error(`Artifact filename collision after normalization: ${seen.get(key)} and ${original}`);
+    seen.set(key, original);
+    return { original, name };
+  });
+  const staging = mkdtempSync(path.join(directory, '.publish-'));
+  const files = assets.map(({ original, name }) => {
+    const file = path.join(staging, name);
+    copyFileSync(path.join(directory, original), file);
+    return file;
+  });
+  const sums = files.map(file => `${createHash('sha256').update(readFileSync(file)).digest('hex')}  ${path.basename(file)}\n`).join('');
   writeFileSync(path.join(directory, 'SHA256SUMS.txt'), sums);
-  return [...names, 'SHA256SUMS.txt'].map(name => path.join(directory, name));
+  return [...files, path.join(directory, 'SHA256SUMS.txt')];
 }
 
 const defaultGh = args => spawnSync('gh', args, { encoding: 'utf8' });
@@ -74,8 +88,21 @@ export function publishRelease({ directory, metadata, repository, gh = defaultGh
     invoke(['release', 'create', metadata.tag, ...files, '--draft', '--target', metadata.sha, '--title', metadata.title, '--notes-file', notes]);
   }
   const uploaded = JSON.parse(invoke(['release', 'view', metadata.tag, '--json', 'isDraft,assets']));
-  if (!uploaded.isDraft || !files.every(file => uploaded.assets?.some(asset => asset.name === path.basename(file)))) {
-    throw new Error('Draft is incomplete; refusing to publish');
+  if (uploaded.isDraft !== true) throw new Error(`Expected an unpublished draft for ${metadata.tag}; received isDraft=${JSON.stringify(uploaded.isDraft)}`);
+  const remote = Array.isArray(uploaded.assets) ? uploaded.assets : [];
+  const problems = [];
+  for (const file of files) {
+    const name = path.basename(file);
+    const asset = remote.find(entry => entry.name === name);
+    if (!asset) problems.push(`missing ${JSON.stringify(name)}`);
+    else {
+      if (asset.state !== 'uploaded') problems.push(`${JSON.stringify(name)} state=${JSON.stringify(asset.state)}`);
+      const size = statSync(file).size;
+      if (asset.size !== size) problems.push(`${JSON.stringify(name)} size=${JSON.stringify(asset.size)}, expected ${size}`);
+    }
+  }
+  if (problems.length) {
+    throw new Error(`Draft is incomplete; refusing to publish ${metadata.tag}. Problems: ${problems.join('; ')}. GitHub assets: ${JSON.stringify(remote.map(asset => ({ name: asset.name, state: asset.state, size: asset.size })))}`);
   }
   invoke(['release', 'edit', metadata.tag, '--draft=false', `--prerelease=${metadata.prerelease}`, `--latest=${!metadata.prerelease}`]);
   const published = JSON.parse(invoke(['release', 'view', metadata.tag, '--json', 'isDraft,isPrerelease,tagName,url']));

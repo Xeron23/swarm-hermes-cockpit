@@ -4,7 +4,7 @@ Validasi perubahan dilakukan pada 25 Oktober 2026. Kontrak backend berasal dari 
 
 | Pemeriksaan | Hasil |
 | --- | --- |
-| `npm test` | 23 tes client/release lulus, ditambah tes boundary clipboard/runtime dan WebSocket native (subprotokol, replay awal, ping, close) dengan mock resmi Tauri |
+| `npm test` | 27 tes client/release lulus, ditambah tes boundary clipboard/runtime dan WebSocket native (subprotokol, replay awal, ping, close) dengan mock resmi Tauri |
 | `npm run check` | Lulus: schema konfigurasi base/Windows/Android, aset, sintaks JS, versi, dan scope HTTP native |
 | `npm run web:build` | Lulus; bundle memasukkan transport HTTP/WebSocket native secara dinamis |
 | Browser development, viewport desktop | Lulus terhadap fixture kontrak |
@@ -25,5 +25,7 @@ Tes unit memeriksa scope endpoint, Base32 pairing, rotasi refresh bersamaan, res
 Tes integrasi browser memeriksa keadaan belum dipasangkan tanpa node/mission contoh, pairing, snapshot, PC offline, metrik null, filter sentuh, session/chat streaming, mission backend dengan target auto, escaping payload, traces/log, pembaruan metrik dari event, serta keadaan terputus/data lama. Tes juga menolak approval ketika request hash berubah setelah dialog dibuka, lalu memverifikasi keputusan untuk hash yang benar-benar ditinjau.
 
 Tes release memeriksa tag prerelease unik untuk push/rerun, kecocokan tag versi, keberadaan seluruh platform sebelum kontak GitHub, unggahan draft sebelum publikasi, draft tidak lengkap tetap tidak dipublikasikan, penanganan akses GitHub yang ditolak, dan perlindungan rilis versi yang sudah terbit.
+
+Regresi nama installer Windows yang mengandung spasi mereproduksi error `Draft is incomplete` pada pemeriksaan lama. Perbaikan menyiapkan salinan dengan nama aman sebelum upload dan membuat checksum berdasarkan nama tersebut. Tes juga memastikan file asli tidak berubah, persiapan ulang konsisten, nama yang bertabrakan ditolak, serta aset berstatus `starter` atau berukuran salah tidak dipublikasikan. Pesan kegagalan mencantumkan detail aset yang diharapkan dan yang dilaporkan GitHub.
 
 Tidak ada perintah power yang dikirim ke VPS/PC pengguna oleh tes. Kondisi online/angka fixture bukan klaim bahwa worker atau collector pengguna telah berjalan. Pengujian native dan jaringan asli diperlukan sebelum menyatakan deployment Windows/Android selesai.

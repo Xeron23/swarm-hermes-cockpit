@@ -78,6 +78,7 @@ npm run android:build:debug -- --target aarch64
 - Push tag `v<versi>` yang sesuai versi aplikasi menghasilkan rilis versi tersebut. Versi di npm, konfigurasi Tauri, dan Cargo harus sama. Versi seperti `v0.2.0-rc.1` tetap ditandai sebagai prerelease.
 - Workflow juga dapat dijalankan dari **Actions → Build and release Windows & Android → Run workflow**.
 - Setiap release menyertakan installer, APK, dan `SHA256SUMS.txt`. Draft baru dipublikasikan setelah seluruh file berhasil diunggah. Build platform yang gagal menghentikan publikasi.
+- Nama aset dinormalisasi sebelum upload (misalnya spasi pada `Hermes Cockpit` menjadi `Hermes-Cockpit`), sehingga checksum menggunakan nama file yang benar-benar diunduh. File build asli tetap dipertahankan. Pemeriksaan draft memvalidasi nama, status upload, dan ukuran setiap aset.
 - Build `main` tidak menimpa rilis versi yang sudah terbit. Tag versi yang sudah dipublikasikan dipertahankan; gunakan versi baru untuk perubahan kode.
 - APK merupakan build debug untuk pengujian perangkat. Identitas signing debug dicache di Actions; jika cache hilang, signature bisa berubah dan instalasi debug lama mungkin perlu dihapus. Signing Android produksi/Play Store dan code-signing Windows belum dikonfigurasi.
 
