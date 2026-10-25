@@ -1,121 +1,174 @@
-name: Release Desktop & Mobile App
+name: Build and release Windows & Android
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+    tags: ['v*']
   workflow_dispatch:
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+env:
+  CARGO_BUILD_JOBS: 2
+  CARGO_TERM_COLOR: always
 
 jobs:
-  build-windows:
-    name: Build Windows Desktop (x86_64)
-    runs-on: windows-latest
+  validate:
+    name: Validate client and release metadata
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'npm'
+          cache: npm
+      - run: npm ci
+      - run: npm run check && npm test && npm run web:build
+      - name: Plan release
+        id: release
+        run: node scripts/release.mjs metadata
 
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+  build-windows:
+    name: Windows x86_64 installers
+    needs: validate
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
-
-      - name: Install frontend dependencies
-        run: npm ci
-
-      - name: Validate client
-        run: npm run check && npm test
-
-      - name: Build Frontend Web
-        run: npm run web:build
-
-      - name: Build Tauri Windows App
-        run: npx tauri build --bundles msi,nsis
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create or Update GitHub Release and Upload Windows Artifacts
-        shell: bash
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: windows-x86_64
+      - run: npm ci
+      - name: Build NSIS and MSI
+        run: npx tauri build --ci --bundles msi,nsis -- --locked
+      - name: Collect Windows installers
+        shell: pwsh
         run: |
-          TAG_NAME="${GITHUB_REF#refs/tags/}"
-          if [ -z "$TAG_NAME" ] || [ "$TAG_NAME" = "refs/heads/main" ]; then
-            TAG_NAME="v0.1.1"
-          fi
-          echo "Target Release Tag: $TAG_NAME"
-          gh release view "$TAG_NAME" || gh release create "$TAG_NAME" --title "Hermes Cockpit $TAG_NAME" --notes "Production release for Windows & Android with full backend integration."
-          
-          # Find and upload msi and exe
-          find src-tauri/target/release/bundle/ -type f \( -name "*.msi" -o -name "*.exe" \) | while read -r file; do
-            echo "Uploading $file"
-            gh release upload "$TAG_NAME" "$file" --clobber
-          done
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          $files = @(Get-ChildItem src-tauri/target/release/bundle -Recurse -File | Where-Object { $_.Extension -in '.exe', '.msi' })
+          foreach ($extension in '.exe', '.msi') {
+            if (-not ($files | Where-Object { $_.Extension -eq $extension })) {
+              throw "Missing Windows installer: $extension"
+            }
+          }
+          New-Item -ItemType Directory -Path release-assets -Force | Out-Null
+          Copy-Item -LiteralPath $files.FullName -Destination release-assets
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 14
 
   build-android:
-    name: Build Android APK
+    name: Android ARM64 debug APK
+    needs: validate
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ANDROID_NDK_VERSION: 26.1.10909125
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+        with:
+          # Official repository: commandlinetools-linux-16111833_latest.zip.
+          cmdline-tools-version: '16111833'
+          log-accepted-android-sdk-licenses: false
+          packages: platform-tools
+      - name: Install SDK matching the pinned Tauri CLI template
+        run: |
+          sdkmanager --install "platforms;android-37.0" "build-tools;37.0.0" "ndk;$ANDROID_NDK_VERSION"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: android-aarch64
+      - name: Reuse debug signing identity when cached
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: hermes-android-debug-keystore-v1
+      - run: npm ci
+      - name: Generate Android project
+        run: npx tauri android init --ci --skip-targets-install
+      - name: Build Android APK
+        run: npx tauri android build --apk --debug --target aarch64 --ci -- --locked
+      - name: Collect and verify ARM64 APKs
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          import zipfile
+          files = sorted(Path('src-tauri/gen/android/app/build/outputs/apk').rglob('*.apk'))
+          if not files:
+              raise SystemExit('No Android APK was built')
+          output = Path('release-assets')
+          output.mkdir()
+          for source in files:
+              with zipfile.ZipFile(source) as apk:
+                  names = apk.namelist()
+                  if 'AndroidManifest.xml' not in names or not any(name.startswith('lib/arm64-v8a/') and 'hermes' in name and name.endswith('.so') for name in names):
+                      raise SystemExit(f'Missing Android manifest or ARM64 app library: {source}')
+                  if apk.testzip() is not None:
+                      raise SystemExit(f'Corrupt APK: {source}')
+              shutil.copy2(source, output / f'hermes-cockpit-android-arm64-{source.name}')
+          PY
+          for apk in release-assets/*.apk; do
+            "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --verbose "$apk"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-android
+          path: release-assets/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish ${{ needs.validate.outputs.tag }}
+    needs: [validate, build-windows, build-android]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'npm'
-
-      - name: Setup Java JDK
-        uses: actions/setup-java@v4
+      - uses: actions/download-artifact@v4
         with:
-          distribution: 'zulu'
-          java-version: '17'
-
-      - name: Install Android NDK & Build-Tools
-        run: |
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;26.1.10909125" "build-tools;34.0.0" "platforms;android-34"
-          echo "NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
-
-      - name: Install Rust & Android Targets
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android
-
-      - name: Install frontend dependencies
-        run: npm ci
-
-      - name: Validate client
-        run: npm run check && npm test
-
-      - name: Initialize and Build Android APK
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+      - name: Publish only after all platform assets are ready
+        run: node scripts/release.mjs publish release-assets
         env:
-          NDK_HOME: ${{ env.NDK_HOME }}
-        run: |
-          npx tauri android init --ci
-          npx tauri android build --apk --debug --target aarch64
-
-      - name: Create or Update GitHub Release and Upload APK
-        run: |
-          TAG_NAME="${GITHUB_REF#refs/tags/}"
-          if [ -z "$TAG_NAME" ] || [ "$TAG_NAME" = "refs/heads/main" ]; then
-            TAG_NAME="v0.1.1"
-          fi
-          echo "Target Release Tag: $TAG_NAME"
-          # Create release if it doesn't exist
-          gh release view "$TAG_NAME" || gh release create "$TAG_NAME" --title "Hermes Cockpit $TAG_NAME" --notes "Production release with full backend connectivity (FastAPI + PostgreSQL + WebSocket telemetry)."
-          # Upload Android APK
-          gh release upload "$TAG_NAME" src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk --clobber
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}

@@ -42,6 +42,10 @@ for (const filename of await readdir(path.join(root, 'src'))) {
 }
 const pkg = await json('package.json');
 assert.equal(pkg.version, base.version);
+const cargo = await readFile(path.join(root, 'src-tauri/Cargo.toml'), 'utf8');
+const packageSection = cargo.match(/\[package\]([\s\S]*?)(?=\n\[|$)/)?.[1];
+const cargoVersion = packageSection?.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
+assert.equal(cargoVersion, pkg.version, 'Cargo, Tauri, and npm application versions must match');
 assert.ok(pkg.dependencies['@tauri-apps/api'].startsWith('2.'));
 assert.ok(pkg.devDependencies['@tauri-apps/cli'].startsWith('2.'));
 console.log('PASS: Tauri v2 config schema (base, Android, Windows)');

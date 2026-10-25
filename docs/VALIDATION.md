@@ -4,7 +4,7 @@ Validasi perubahan dilakukan pada 25 Oktober 2026. Kontrak backend berasal dari 
 
 | Pemeriksaan | Hasil |
 | --- | --- |
-| `npm test` | 16 tes client lulus, ditambah tes boundary clipboard/runtime dan WebSocket native (subprotokol, replay awal, ping, close) dengan mock resmi Tauri |
+| `npm test` | 23 tes client/release lulus, ditambah tes boundary clipboard/runtime dan WebSocket native (subprotokol, replay awal, ping, close) dengan mock resmi Tauri |
 | `npm run check` | Lulus: schema konfigurasi base/Windows/Android, aset, sintaks JS, versi, dan scope HTTP native |
 | `npm run web:build` | Lulus; bundle memasukkan transport HTTP/WebSocket native secara dinamis |
 | Browser development, viewport desktop | Lulus terhadap fixture kontrak |
@@ -17,9 +17,13 @@ Validasi perubahan dilakukan pada 25 Oktober 2026. Kontrak backend berasal dari 
 | APK Android | Belum dibangun atau diuji pada Android asli; SDK/NDK tidak disiapkan untuk tugas ini |
 | Rute LAN versus subnet Tailscale asli | Belum diverifikasi dari Windows/Android pengguna |
 | Metrik hardware pengguna | Belum tersedia menurut backend yang dijelaskan pengguna; worker PC offline, collector hardware server belum ada |
+| Workflow release | Diperiksa dengan actionlint; helper release diuji tanpa publikasi eksternal |
+| Pemantauan GitHub Actions dari cloud | Akses `api.github.com` ditolak proxy; status build/release remote belum dapat dikonfirmasi |
 
 Tes unit memeriksa scope endpoint, Base32 pairing, rotasi refresh bersamaan, respons refresh hilang, token reuse/revocation, logout saat refresh berjalan, mutasi tanpa retry buta, error typed approval, sequence besar, deduplikasi/reconnect, snapshot workspace yang salah, metrik null, serta rekonsiliasi delta/final message.
 
 Tes integrasi browser memeriksa keadaan belum dipasangkan tanpa node/mission contoh, pairing, snapshot, PC offline, metrik null, filter sentuh, session/chat streaming, mission backend dengan target auto, escaping payload, traces/log, pembaruan metrik dari event, serta keadaan terputus/data lama. Tes juga menolak approval ketika request hash berubah setelah dialog dibuka, lalu memverifikasi keputusan untuk hash yang benar-benar ditinjau.
+
+Tes release memeriksa tag prerelease unik untuk push/rerun, kecocokan tag versi, keberadaan seluruh platform sebelum kontak GitHub, unggahan draft sebelum publikasi, draft tidak lengkap tetap tidak dipublikasikan, penanganan akses GitHub yang ditolak, dan perlindungan rilis versi yang sudah terbit.
 
 Tidak ada perintah power yang dikirim ke VPS/PC pengguna oleh tes. Kondisi online/angka fixture bukan klaim bahwa worker atau collector pengguna telah berjalan. Pengujian native dan jaringan asli diperlukan sebelum menyatakan deployment Windows/Android selesai.

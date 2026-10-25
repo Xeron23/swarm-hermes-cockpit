@@ -72,6 +72,17 @@ npm run android:build:debug -- --target aarch64
 
 `package-lock.json` dan `src-tauri/Cargo.lock` mengunci dependency client. Build Windows dilakukan di Windows; APK memerlukan toolchain Android. Installer dan APK baru belum dibuat atau diuji pada perangkat asli di cloud ini. Workflow release menjalankan pemeriksaan frontend sebelum build.
 
+## Build dan release otomatis di GitHub
+
+- Push ke `main` menjalankan validasi, lalu build installer Windows x86_64 (NSIS dan MSI) serta APK Android ARM64 debug. Setelah keduanya berhasil, satu job menerbitkan prerelease dengan tag unik `build-<run>-<commit>-<attempt>`.
+- Push tag `v<versi>` yang sesuai versi aplikasi menghasilkan rilis versi tersebut. Versi di npm, konfigurasi Tauri, dan Cargo harus sama. Versi seperti `v0.2.0-rc.1` tetap ditandai sebagai prerelease.
+- Workflow juga dapat dijalankan dari **Actions → Build and release Windows & Android → Run workflow**.
+- Setiap release menyertakan installer, APK, dan `SHA256SUMS.txt`. Draft baru dipublikasikan setelah seluruh file berhasil diunggah. Build platform yang gagal menghentikan publikasi.
+- Build `main` tidak menimpa rilis versi yang sudah terbit. Tag versi yang sudah dipublikasikan dipertahankan; gunakan versi baru untuk perubahan kode.
+- APK merupakan build debug untuk pengujian perangkat. Identitas signing debug dicache di Actions; jika cache hilang, signature bisa berubah dan instalasi debug lama mungkin perlu dihapus. Signing Android produksi/Play Store dan code-signing Windows belum dikonfigurasi.
+
+SDK CI mengikuti template CLI Tauri yang dikunci: platform Android 37.0, Build-Tools 37.0.0, NDK 26.1.10909125, dan JDK 21. File APK ditemukan dari output build dan diperiksa isi ARM64 serta signature-nya, sehingga publikasi tidak bergantung pada satu nama/path APK tertentu.
+
 ## Pengujian integrasi browser
 
 Dengan Python Playwright dan Chromium terpasang, jalankan Vite atau production preview, lalu:
