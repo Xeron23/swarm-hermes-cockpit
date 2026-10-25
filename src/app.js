@@ -4,6 +4,7 @@ import { $, esc } from './ui.js';
 import { render, connectionBody, actionButton, time, stageText } from './views.js';
 import { formatApiError } from './diagnostics.js';
 import { BUILD_INFO } from './build_info.js';
+import { normalizePairingInput } from './pairing.js';
 
 const workspace = new Workspace(api);
 const ui = { page: 'overview', agentId: null, sessionId: null, agentFilter: 'all', eventFilter: 'all', target: 'auto', draft: '', error: '', pending: new Set(), logTraceId: null, connectionDiagnostic: '' };
@@ -107,8 +108,14 @@ workspace.subscribe(() => {
   }
 });
 
-document.addEventListener('input', event => { if (event.target.id === 'chat-input') ui.draft = event.target.value; });
-document.addEventListener('change', event => { if (event.target.id === 'chat-route') ui.target = event.target.value; });
+document.addEventListener('input', event => {
+  if (event.target.id === 'pair-code') normalizePairingInput(event.target);
+  if (event.target.id === 'chat-input') ui.draft = event.target.value;
+});
+document.addEventListener('change', event => {
+  if (event.target.id === 'pair-code') normalizePairingInput(event.target);
+  if (event.target.id === 'chat-route') ui.target = event.target.value;
+});
 document.addEventListener('click', event => {
   if (event.target.id === 'overlay-backdrop') { close(); return; }
   const button = event.target.closest('[data-action]');

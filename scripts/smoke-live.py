@@ -118,14 +118,33 @@ with sync_playwright() as p:
         expect(page.locator('.mission-card')).to_have_count(0)
         assert not backend.requests, 'Unpaired client must not authenticate with old/demo credentials'
         page.get_by_label('Backend status').click()
-        expect(page.get_by_role('dialog')).to_contain_text('0.1.3')
+        expect(page.get_by_role('dialog')).to_contain_text('0.1.4')
         expect(page.get_by_role('dialog')).to_contain_text('Browser fetch + WebSocket')
         page.get_by_role('button', name='Uji API tanpa pairing').click()
         expect(page.locator('#connection-diagnostics')).to_contain_text('API dapat dijangkau')
         expect(page.locator('#connection-diagnostics')).to_contain_text('1.0.0')
         assert backend.requests == [('GET', '/health/ready', None)]
         backend.pair_failure = True
-        page.locator('#pair-code').fill('A' * 26)
+
+        def paste_code(value):
+            page.locator('#pair-code').fill('')
+            page.evaluate('(text) => navigator.clipboard.writeText(text)', value)
+            page.locator('#pair-code').click()
+            page.keyboard.press('Control+V')
+
+        for raw in ['A' * 26, '  ' + 'a' * 26 + '\u00a0\n', '\u2066\u200b' + 'A' * 13 + '\u200d' + 'A' * 13 + '\u2069']:
+            paste_code(raw)
+            expect(page.locator('#pair-code')).to_have_value('A' * 26)
+            assert page.locator('#pair-code').evaluate('(el) => el.checkValidity()')
+        for invalid in ['A' * 27, '8' * 26, 'A' * 25 + '-']:
+            paste_code(invalid)
+            expect(page.locator('#pair-code')).to_have_value(invalid)
+            page.locator('button[form="pair-form"]').click()
+            assert not page.locator('#pair-code').evaluate('(el) => el.checkValidity()')
+            assert backend.requests == [('GET', '/health/ready', None)], 'Invalid input must not consume a pairing attempt'
+
+        paste_code('  ' + 'a' * 26 + '\u200b\u00a0')
+        expect(page.locator('#pair-code')).to_have_value('A' * 26)
         page.locator('#device-name').fill('Fixture client')
         page.locator('button[form="pair-form"]').click()
         expect(page.locator('#connection-diagnostics')).to_contain_text('HTTP 400')
@@ -246,6 +265,6 @@ with sync_playwright() as p:
         expect(page.locator('.node-card')).to_have_count(2)
         assert not errors, errors
         assert not any('/power' in path for _, path, _ in backend.requests), 'No power operation should have been sent'
-        print(f'PASS {"Android viewport/touch" if mobile else "Windows viewport"}: build identity, unauthenticated health probe, redacted persistent pairing errors, pairing, null metrics/offline PC, filters, chat streaming/final, backend mission, escaped payload, traces/logs, real metric update, disconnect/stale state')
+        print(f'PASS {"Android viewport/touch" if mobile else "Windows viewport"}: clipboard pairing normalization without truncation, invalid input blocked, build identity, health probe, persistent pairing/telemetry errors, pairing, null metrics/offline PC, filters, chat, missions, escaped payload, traces/logs, metric updates, stale state')
         context.close()
     browser.close()

@@ -19,7 +19,7 @@ const nativeCalls = [];
 globalThis.isTauri = true;
 mockIPC((command, args) => {
   nativeCalls.push({ command, args });
-  if (command === 'runtime_info') return { app: 'Hermes Cockpit', version: '0.1.3', platform: 'android', mode: 'live', commit: 'fixture-commit', build_run: '15' };
+  if (command === 'runtime_info') return { app: 'Hermes Cockpit', version: '0.1.4', platform: 'android', mode: 'live', commit: 'fixture-commit', build_run: '15' };
   if (command === 'plugin:clipboard-manager|write_text') return null;
   throw new Error(`Unexpected native command: ${command}`);
 });

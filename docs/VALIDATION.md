@@ -4,13 +4,13 @@ Validasi perubahan dilakukan pada 25 Oktober 2026. Kontrak backend berasal dari 
 
 | Pemeriksaan | Hasil |
 | --- | --- |
-| `npm test` | 51 tes client/release/diagnostik/helper Windows lulus; ditambah boundary clipboard/runtime, HTTP native termasuk pairing/Bearer tanpa fetch WebView, dan WebSocket native dengan mock resmi Tauri |
+| `npm test` | 53 tes client/release/diagnostik/helper Windows lulus pada Node 24 dan Node 22.12; ditambah boundary clipboard/runtime, HTTP native termasuk pairing/Bearer tanpa fetch WebView, dan WebSocket native dengan mock resmi Tauri |
 | `npm run check` | Lulus: schema konfigurasi base/Windows/Android, aset, sintaks JS, versi, dan scope HTTP native |
-| `npm run web:build` | Lulus untuk 0.1.3; command HTTP Rust, transport WebSocket native, dan manifest identitas build tervalidasi |
+| `npm run web:build` | Lulus untuk 0.1.4; command HTTP Rust, transport WebSocket native, dan manifest identitas build tervalidasi |
 | Browser development, viewport desktop | Lulus terhadap fixture kontrak |
 | Browser development, viewport Android/touch | Lulus terhadap fixture kontrak, dengan motion normal |
 | Browser production preview, viewport desktop dan Android/touch | Lulus terhadap fixture kontrak |
-| Native Linux debug tanpa installer | Lulus untuk 0.1.3: Rust, Tauri, HTTP langsung dan WebSocket native; dependency tercatat di Cargo.lock |
+| Native Linux debug tanpa installer | Lulus untuk 0.1.4: Rust, Tauri, HTTP langsung dan WebSocket native; dependency tercatat di Cargo.lock |
 | `cargo test --lib --offline --locked` | 5 tes native lulus, juga ketika HTTP_PROXY/HTTPS_PROXY/ALL_PROXY menunjuk proxy uji yang tidak tersedia dan NO_PROXY kosong |
 | Backend LAN pengguna | Tidak berhasil dijangkau dari cloud; proxy membalas `403 Domain forbidden` |
 | GUI/WebView native Linux di cloud | Belum dapat dijalankan: path helper WebKit berada pada direktori sistem read-only; namespace bind mount juga tidak tersedia |
@@ -26,6 +26,8 @@ Tes unit memeriksa scope endpoint, Base32 pairing, rotasi refresh bersamaan, res
 Tes integrasi browser memeriksa keadaan belum dipasangkan tanpa node/mission contoh, pairing, snapshot, PC offline, metrik null, filter sentuh, session/chat streaming, mission backend dengan target auto, escaping payload, traces/log, pembaruan metrik dari event, serta keadaan terputus/data lama. Tes juga menolak approval ketika request hash berubah setelah dialog dibuka, lalu memverifikasi keputusan untuk hash yang benar-benar ditinjau.
 
 Regresi koneksi 0.1.2 diuji pada production preview desktop dan mobile/touch: versi tampil, uji health mengirim GET tanpa Authorization maupun pairing, respons pairing HTTP 400 menampilkan kode/status/endpoint tanpa nilai kode pairing, dan error tetap tersedia setelah dialog ditutup lalu dibuka. Tes unit membedakan penolakan scope, izin native, koneksi ditolak, timeout, dan kegagalan fetch browser, serta menolak manifest versi/commit/run yang salah.
+
+Regresi 0.1.4 memakai clipboard browser sungguhan dan Control+V pada viewport desktop/mobile. Kode 26 karakter dengan spasi awal, huruf kecil, NBSP, dan penanda tersembunyi diterima secara utuh dan body POST mengirim bentuk canonical. Kode 27 karakter tidak dipotong; karakter 8 atau tanda baca ditolak tanpa request pairing. Reproduksi kolom lama menunjukkan input 26 karakter dengan dua spasi awal hanya menyisakan 24 karakter kode setelah terkena maxlength. Tes memakai kode fixture, bukan kode pairing pengguna.
 
 Regresi 0.1.3 mereproduksi health sukses dengan tiket telemetry 403, membedakan pairing diterima dari tahap tiket yang gagal, mempertahankan error meskipun health/polling berhasil, serta menyalin laporan tanpa token/kode pairing dan reconnect tanpa mengonsumsi kode pairing baru. Native memakai socket HTTP sungguhan untuk POST body, header Bearer, HTTP error, penolakan koneksi OS, redirect, dan pembatasan scope. Command IPC Tauri sungguhan juga diuji: window utama diizinkan, window lain ditolak. Workflow Windows menjalankan suite native setelah build; keberhasilan workflow remote belum dikonfirmasi dari cloud. Rincian reproduksi ada pada [analisis koneksi](CONNECTION_ANALYSIS.md).
 

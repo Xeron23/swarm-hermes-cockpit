@@ -38,6 +38,29 @@ test('pairing validates Base32 and sends no old Authorization header', async () 
   await api.pair('a'.repeat(26), ' PC ');
   assert.equal(calls, 1);
 });
+test('pairing preserves all 26 characters when pasted with spacing, lowercase, or invisible formatting', async () => {
+  const code = 'ABCD2345EFGH2345IJKL2345MN';
+  assert.equal(code.length, 26);
+  let calls = 0;
+  const api = client({ fetcher: async (_, options) => {
+    calls++;
+    assert.equal(JSON.parse(options.body).pairing_code, code);
+    assert.equal(options.headers.Authorization, undefined);
+    return response(tokens);
+  } });
+  const variants = [code, code.toLowerCase(), `  ${code}\u00a0\r\n`, `${code.slice(0, 13)} ${code.slice(13)}`,
+    `\u2066\u200b${code.slice(0, 13)}\u200d${code.slice(13)}\u2069\ufeff`];
+  for (const value of variants) await api.pair(value, 'Fixture client');
+  assert.equal(calls, variants.length);
+});
+test('invalid or overlong pairing codes are rejected without truncating or guessing characters', async () => {
+  let calls = 0;
+  const api = client({ fetcher: async () => { calls++; return response(tokens); } });
+  for (const value of ['A'.repeat(27), 'A'.repeat(25), 'A'.repeat(26) + '8', '8'.repeat(26), '0'.repeat(26), 'A'.repeat(25) + '-', 'ß'.repeat(13)]) {
+    await assert.rejects(api.pair(value, 'Fixture client'), { code: 'INVALID_PAIRING_CODE' });
+  }
+  assert.equal(calls, 0);
+});
 test('concurrent expired access tokens rotate a refresh token only once', async () => {
   let rotations = 0;
   const api = client({ fetcher: async (url, options) => {

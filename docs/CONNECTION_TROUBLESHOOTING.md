@@ -12,8 +12,8 @@ Ini merupakan indikasi frontend lama masih berjalan. Isi installer yang dipasang
 
 ## Pemeriksaan pada Windows
 
-1. Tutup seluruh proses Hermes Cockpit sebelum memasang installer 0.1.3 dari build terbaru yang berhasil di GitHub Releases.
-2. Buka **Server & jaringan**. **Client build** dan **Runtime build** harus menunjukkan versi 0.1.3 dan commit yang sama. Transport harus **Native HTTP + WebSocket**. Identitas yang berbeda memunculkan pesan untuk memasang installer dari build yang sama.
+1. Tutup seluruh proses Hermes Cockpit sebelum memasang installer 0.1.4 dari build terbaru yang berhasil di GitHub Releases.
+2. Buka **Server & jaringan**. **Client build** dan **Runtime build** harus menunjukkan versi 0.1.4 dan commit yang sama. Transport harus **Native HTTP + WebSocket**. Identitas yang berbeda memunculkan pesan untuk memasang installer dari build yang sama.
 3. Klik **Uji API tanpa pairing**. Tombol ini hanya melakukan GET `/health/ready`, tanpa token atau kode pairing. Hasil sukses seharusnya menampilkan service `api` dan versi backend 1.0.0.
 4. Jika health berhasil, lakukan pairing dengan kode sekali pakai yang masih berlaku. Jangan membagikan kode atau token dalam laporan masalah.
 5. Jika gagal, salin pesan pada dialog beserta Client build, Runtime build, dan Transport. Error menampilkan tahap/endpoint sehingga health, pairing, bootstrap, dan telemetry dapat dibedakan.
@@ -35,3 +35,9 @@ Versi 0.1.2 mempertahankan error dalam dialog dan menyamarkan kode pairing/token
 ## Perbaikan 0.1.3
 
 HTTP native kini memakai command Rust yang membatasi request ke API VM dan tidak mewarisi proxy sistem. Dialog membedakan pairing yang diterima dari kegagalan bootstrap/tiket/handshake, mempertahankan error telemetry meskipun health/polling berhasil, dan menyediakan **Salin laporan koneksi**. Lihat [analisis beserta reproduksi](CONNECTION_ANALYSIS.md).
+
+## Validasi kode pairing 0.1.4
+
+Kode Base32 26 karakter sebenarnya memenuhi pola, tetapi kolom lama dapat menolaknya saat ditempel bersama spasi atau karakter format tersembunyi. Reproduksi paste melalui clipboard menunjukkan `maxlength=26` memotong dua karakter kode jika ada dua spasi di depan. Validasi HTML berjalan sebelum normalisasi pada submit, sehingga trim pada API client tidak dapat memperbaiki input yang sudah terpotong.
+
+Kolom sekarang menerima input lengkap, menormalisasinya pada input/change, dan memakai aturan yang sama dengan API client. Spasi, penanda zero-width/bidi, dan huruf kecil dari hasil salin ditangani sebelum pemeriksaan pola. Angka di luar 2–7, tanda baca, serta kode yang tetap bukan 26 karakter ditolak sebelum request. Kode panjang tidak dipangkas atau ditebak menjadi kode lain. Validasi format di client tetap terpisah dari pengecekan masa berlaku kode oleh backend.

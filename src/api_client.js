@@ -1,6 +1,7 @@
 import { SERVER_URL, httpFetch, openSocket } from './transport.js';
 import { isTauri } from '@tauri-apps/api/core';
 import { transportFailure, redactDiagnostic } from './diagnostics.js';
+import { normalizePairingCode, pairingCodeError } from './pairing.js';
 
 export class ApiError extends Error {
   constructor(message, { status = 0, code = 'NETWORK_ERROR', retryable = false, details = {}, endpoint, method } = {}) {
@@ -122,8 +123,9 @@ export class HermesApiClient {
     return this.refreshing;
   }
   async pair(pairingCode, deviceName) {
-    const code = pairingCode.trim().toUpperCase();
-    if (!/^[A-Z2-7]{26}$/.test(code)) throw new ApiError('Kode pairing harus berisi 26 karakter A–Z atau 2–7.', { code: 'INVALID_PAIRING_CODE' });
+    const code = normalizePairingCode(pairingCode);
+    const invalid = pairingCodeError(code);
+    if (invalid) throw new ApiError(invalid, { code: 'INVALID_PAIRING_CODE' });
     const name = deviceName.trim();
     if (!name || name.length > 100) throw new ApiError('Nama perangkat harus berisi 1–100 karakter.', { code: 'INVALID_DEVICE_NAME' });
     this.stopTelemetry();
