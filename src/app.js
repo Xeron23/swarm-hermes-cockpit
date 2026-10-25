@@ -258,7 +258,43 @@ document.addEventListener('submit',async e=>{
     }
     return;
   }
-  if(e.target.id==='chat-form'){e.preventDefault();sendChat($('#chat-input').value)}if(e.target.id==='mission-form'){e.preventDefault();const title=$('#mission-title').value.trim(),prompt=$('#mission-prompt').value.trim();if(!title||!prompt){toast('Fill in the mission name and instructions');return}if(state.newRoute==='pc'&&state.pcState!=='online'){toast('Wake the PC in Nodes before launching');return}const node=state.newRoute==='auto'?(/\bpc\b|gpu|windows|desktop/i.test(prompt)?'pc':'vps'):state.newRoute;if(node==='pc'&&state.pcState!=='online'){toast('Auto route selected PC. Wake the node first.');return}state.mission={title,prompt,node,id:'MSN-'+String(25+state.feed.filter(f=>f.tag==='Mission created').length).padStart(3,'0'),stage:1,paused:false,description:'Main has assigned specialists to your mission'};addFeed({from:'main',to:'coder',text:prompt,tag:'Mission created',type:'handoff',node,tokens:840});persist();closeSheet();state.page='overview';shell();window.scrollTo(0,0);toast('Mission launched · agents assigned');}});
+  if(e.target.id==='chat-form'){e.preventDefault();sendChat($('#chat-input').value)}  if(e.target.id==='mission-form'){
+    e.preventDefault();
+    const title=$('#mission-title').value.trim(), prompt=$('#mission-prompt').value.trim();
+    if(!title||!prompt){ toast('Fill in the mission name and instructions'); return; }
+    if(state.newRoute==='pc'&&state.pcState!=='online'){ toast('Wake the PC in Nodes before launching'); return; }
+    const node=state.newRoute==='auto'?(/\bpc\b|gpu|windows|desktop/i.test(prompt)?'pc':'vps'):state.newRoute;
+    if(node==='pc'&&state.pcState!=='online'){ toast('Auto route selected PC. Wake the node first.'); return; }
+    
+    if (hermesApi.accessToken) {
+      try {
+        toast('Submitting mission to backend...');
+        const res = await hermesApi.createMission(title, prompt, { target_node: node });
+        const m = res.mission;
+        state.mission = {
+          title: m.title,
+          prompt: m.prompt,
+          node: m.requested_node || node,
+          id: m.id?.slice(0, 8) || 'MSN-NEW',
+          stage: 1,
+          paused: false,
+          description: 'Mission queued on central durable scheduler'
+        };
+        toast('Mission created & dispatched!');
+      } catch(err) {
+        toast(`Failed to create mission: ${err.message}`);
+      }
+    } else {
+      state.mission={title,prompt,node,id:'MSN-'+String(25+state.feed.filter(f=>f.tag==='Mission created').length).padStart(3,'0'),stage:1,paused:false,description:'Main has assigned specialists to your mission'};
+      addFeed({from:'main',to:'coder',text:prompt,tag:'Mission created',type:'handoff',node,tokens:840});
+      toast('Mission launched (demo)');
+    }
+    persist();
+    closeSheet();
+    state.page='overview';
+    shell();
+    window.scrollTo(0,0);
+  }});
 async function initBackendTelemetry() {
   if (!hermesApi.accessToken) return;
   try {
@@ -268,8 +304,36 @@ async function initBackendTelemetry() {
         const local = agents.find(a => a.id === ba.id);
         if (local) {
           local.status = ba.status === 'idle' ? 'Standby' : ba.status === 'busy' ? 'Working' : ba.status;
+          if (ba.tools) local.tools = ba.tools;
+          if (ba.instructions) local.instruction = ba.instructions;
         }
       }
+    }
+    if (bootstrap.nodes) {
+      for (const bn of bootstrap.nodes) {
+        if (bn.id === 'pc') {
+          state.pcState = bn.status === 'online' ? 'online' : 'offline';
+        }
+      }
+    }
+    // Fetch initial swarm events from backend
+    try {
+      const evPage = await hermesApi.getSwarmEvents();
+      if (evPage.items && evPage.items.length > 0) {
+        state.feed = evPage.items.map(ev => ({
+          id: ev.event_id,
+          from: ev.sender || 'system',
+          to: ev.target !== 'all' ? ev.target : undefined,
+          text: ev.payload?.content || ev.payload?.prompt || `Event ${ev.event_type}`,
+          tag: ev.event_type,
+          type: ev.event_type.includes('DISPATCH') ? 'handoff' : 'tool',
+          node: ev.node || 'vps',
+          tokens: 500,
+          time: new Date(ev.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+        }));
+      }
+    } catch(e) {
+      console.warn('Initial events load error:', e);
     }
     await hermesApi.connectTelemetry((envelope) => {
       if (envelope.event_type === 'MESSAGE_FINAL') {
