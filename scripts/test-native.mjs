@@ -19,7 +19,7 @@ const nativeCalls = [];
 globalThis.isTauri = true;
 mockIPC((command, args) => {
   nativeCalls.push({ command, args });
-  if (command === 'runtime_info') return { app: 'Hermes Cockpit', version: '0.1.4', platform: 'android', mode: 'live', commit: 'fixture-commit', build_run: '15' };
+  if (command === 'runtime_info') return { app: 'Hermes Cockpit', version: '0.1.5', platform: 'android', mode: 'live', commit: 'fixture-commit', build_run: '15' };
   if (command === 'plugin:clipboard-manager|write_text') return null;
   throw new Error(`Unexpected native command: ${command}`);
 });
@@ -93,6 +93,36 @@ assert.equal((await api.getBootstrap()).workspace_id, 'fixture-workspace');
 assert.equal(nativeRequests, 2);
 mockIPC(() => Promise.reject({ code: 'CONNECTION_REFUSED', message: 'Safe Rust classification' }));
 await assert.rejects(api.getHealth(), { code: 'CONNECTION_REFUSED', endpoint: '/health/ready' });
+// Exercise the official Windows updater SDK and Android resource adapter.
+const { updateService } = await import('../src/update_service.js');
+for (const platform of ['windows', 'android']) {
+  const commands = [];
+  mockIPC((command, args) => {
+    commands.push(command);
+    if (command === 'plugin:updater|check' || command === 'android_update_check') return { rid: 41, version: '0.1.5+build.30.1', currentVersion: '0.1.5', body: 'fixture' };
+    if (command === 'plugin:updater|download' || command === 'android_update_download') {
+      assert.equal(args.rid, 41);
+      args.onEvent.onmessage({ event: 'Started', data: { contentLength: 4 } });
+      args.onEvent.onmessage({ event: 'Progress', data: { chunkLength: 4 } });
+      args.onEvent.onmessage({ event: 'Finished' });
+      return platform === 'windows' ? 42 : null;
+    }
+    if (command === 'plugin:updater|install') {
+      assert.equal(args.updateRid, 41); assert.equal(args.bytesRid, 42); assert.equal(args.restartAfterInstall, true); return null;
+    }
+    if (command === 'android_update_install') { assert.equal(args.rid, 41); return { status: 'cancelled' }; }
+    if (command === 'plugin:resources|close' || command === 'android_update_close') return null;
+    throw new Error(`Unexpected updater command: ${command}`);
+  });
+  const update = await updateService.check(platform);
+  assert.equal(commands.length, 1, 'Checking must not download or install.');
+  const events = [];
+  await update.download(event => events.push(event.event));
+  assert.deepEqual(events, ['Started', 'Progress', 'Finished']);
+  const result = await update.install({ restartAfterInstall: true });
+  if (platform === 'android') assert.equal(result.status, 'cancelled');
+  await update.close();
+}
 clearMocks();
 delete globalThis.isTauri;
-console.log('PASS: clipboard/runtime, native HTTP without WebView fetch, and native WebSocket lifecycle (mocked)');
+console.log('PASS: native clipboard/runtime, HTTP, WebSocket, and Windows/Android updater adapters (mocked)');

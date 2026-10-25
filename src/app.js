@@ -5,8 +5,11 @@ import { render, connectionBody, actionButton, time, stageText } from './views.j
 import { formatApiError } from './diagnostics.js';
 import { BUILD_INFO } from './build_info.js';
 import { normalizePairingInput } from './pairing.js';
+import { AppUpdater } from './app_updater.js';
+import { updateBody, updateFooter } from './update_views.js';
 
 const workspace = new Workspace(api);
+const updater = new AppUpdater();
 const ui = { page: 'overview', agentId: null, sessionId: null, agentFilter: 'all', eventFilter: 'all', target: 'auto', draft: '', error: '', pending: new Set(), logTraceId: null, connectionDiagnostic: '' };
 let logTimer;
 function notify(message) {
@@ -69,6 +72,21 @@ function connection() {
     }
   }).catch(() => { if ($('#native-build-info')) $('#native-build-info').textContent = 'Identitas runtime belum dapat dibaca.'; });
 }
+function appUpdates() {
+  sheet('Pembaruan aplikasi', 'Release resmi Hermes Cockpit', updateBody(updater.state), updateFooter(updater.state));
+}
+let updatePaint;
+updater.subscribe(state => {
+  ui.updateReady = ['available', 'ready'].includes(state.status);
+  if (!updatePaint) updatePaint = setTimeout(() => {
+    updatePaint = null;
+    paint();
+    if ($('#updates-panel')) {
+      document.querySelector('.sheet-body').innerHTML = updateBody(updater.state);
+      document.querySelector('.sheet-footer').innerHTML = updateFooter(updater.state);
+    }
+  }, 100);
+});
 function nodeDetail(id) {
   const node = workspace.state.nodes.find(n => n.id === id);
   if (!node) return;
@@ -125,10 +143,15 @@ document.addEventListener('click', event => {
   if (action === 'dismiss-error') { ui.error = ''; paint(); return; }
   if (action === 'navigate') { close(); ui.page = button.dataset.page; paint(); window.scrollTo(0, 0); return; }
   if (action === 'connection') { connection(); return; }
+  if (action === 'app-updates') { appUpdates(); return; }
   if (action === 'inbox') { inbox(); return; }
   if (action === 'agent-filter') { ui.agentFilter = button.dataset.filter; paint(); return; }
   if (action === 'event-filter') { ui.eventFilter = button.dataset.filter; paint(); return; }
   run(action, async () => {
+    if (action === 'update-check') await updater.check();
+    if (action === 'update-download') await updater.download();
+    if (action === 'update-confirm') sheet('Pasang pembaruan?', updater.state.version || '', `<p>${updater.state.platform === 'android' ? 'Android akan meminta konfirmasi untuk memperbarui aplikasi.' : 'Aplikasi akan ditutup sebentar, diperbarui, lalu dibuka kembali.'}</p>${ui.draft ? '<p>Pesan yang belum dikirim akan hilang saat aplikasi ditutup.</p>' : ''}`, actionButton('update-install', 'Pasang sekarang'));
+    if (action === 'update-install') { appUpdates(); await updater.install(); }
     if (action === 'test-connection') {
       if ($('#connection-diagnostics')) $('#connection-diagnostics').textContent = 'Memeriksa GET /health/ready tanpa mengirim kode pairing…';
       const health = await api.getHealth();
@@ -283,7 +306,13 @@ document.addEventListener('keydown', event => {
   }
 });
 window.addEventListener('online', () => { if (api.accessToken) workspace.connect(); });
+window.addEventListener('online', () => updater.check());
+window.addEventListener('beforeunload', () => updater.dispose());
 window.addEventListener('offline', () => { workspace.state.status = 'offline'; workspace.state.error = 'Perangkat tidak memiliki koneksi jaringan.'; workspace.emit(); });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && api.accessToken) workspace.connect(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && (!updater.state.checkedAt || Date.now() - new Date(updater.state.checkedAt).getTime() > updater.interval)) updater.check();
+});
+updater.start();
 paint();
 workspace.connect();

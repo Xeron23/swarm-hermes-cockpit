@@ -21,7 +21,10 @@ export function releaseMetadata(env, version) {
 }
 
 export function prepareArtifacts(directory) {
-  const names = readdirSync(directory, { withFileTypes: true }).filter(entry => entry.isFile() && /\.(msi|exe|apk)$/i.test(entry.name)).map(entry => entry.name).sort();
+  const primary = readdirSync(directory, { withFileTypes: true }).filter(entry => entry.isFile() && /\.(msi|exe|apk)$/i.test(entry.name)).map(entry => entry.name).sort();
+  const signatures = primary.map(name => `${name}.sig`).filter(name => { try { return statSync(path.join(directory, name)).isFile(); } catch { return false; } });
+  if (signatures.length && signatures.length !== primary.length) throw new Error('Updater signatures are incomplete; every installer and APK must be signed together.');
+  const names = [...primary, ...signatures];
   for (const extension of ['.msi', '.exe', '.apk']) {
     if (!names.some(name => name.toLowerCase().endsWith(extension))) throw new Error(`Missing required release artifact: ${extension}`);
   }
@@ -31,7 +34,7 @@ export function prepareArtifacts(directory) {
     // GitHub may rename spaces/special characters during upload, and gh treats
     // '#' as a label separator. Stage safe names BEFORE checksumming/uploading.
     const name = original.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[._-]+|[._-]+$/g, '');
-    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*\.(msi|exe|apk)$/i.test(name)) throw new Error(`Invalid artifact filename: ${original}`);
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*\.(msi|exe|apk)(?:\.sig)?$/i.test(name)) throw new Error(`Invalid artifact filename: ${original}`);
     const key = name.toLowerCase();
     if (seen.has(key)) throw new Error(`Artifact filename collision after normalization: ${seen.get(key)} and ${original}`);
     seen.set(key, original);

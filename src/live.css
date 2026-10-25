@@ -13,6 +13,7 @@
 .connection-details dt{color:var(--muted)}
 .connection-details dd{margin:0;overflow-wrap:anywhere}
 #connection-diagnostics{white-space:pre-wrap;overflow-wrap:anywhere}
+.update-progress{display:block;width:100%;margin-top:20px;accent-color:var(--green-ink)}
 .sheet-body pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.6 var(--mono);padding:15px;border-radius:12px;background:var(--cream-light);max-height:50vh;overflow:auto}
 .sheet-body>p{margin:14px 0}
 .sheet-body select{width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--cream-light);color:var(--text)}

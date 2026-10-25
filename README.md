@@ -65,6 +65,8 @@ Jika Connect gagal, dialog menampilkan tahap health/bootstrap/tiket/handshake se
 
 ## Build
 
+Windows dan Android mendukung pembaruan dari menu **Pembaruan aplikasi**. Pemeriksaan berjalan otomatis; unduh dan pasang menunggu klik pengguna. Untuk mengaktifkan distribusi dari repository public khusus paket release dan mengatur signing, ikuti [pengaturan pembaruan](docs/UPDATES.md).
+
 ```bash
 # Desktop pada OS target
 npm run build

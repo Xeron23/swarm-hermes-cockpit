@@ -1,0 +1,7 @@
+{
+  "identifier": "android-updater",
+  "description": "Signed APK download and Android-confirmed update installation.",
+  "platforms": ["android"],
+  "windows": ["main"],
+  "permissions": ["allow-android-update-check", "allow-android-update-download", "allow-android-update-install", "allow-android-update-close"]
+}

@@ -1,0 +1,7 @@
+{
+  "identifier": "windows-updater",
+  "description": "Signed application updates, initiated from the main Windows window.",
+  "platforms": ["windows"],
+  "windows": ["main"],
+  "permissions": ["updater:allow-check", "updater:allow-download", "updater:allow-install"]
+}

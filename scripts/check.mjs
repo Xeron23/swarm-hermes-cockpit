@@ -36,6 +36,13 @@ assert.ok(capabilities.permissions.includes('clipboard-manager:allow-write-text'
 assert.ok(capabilities.permissions.includes('websocket:default'));
 assert.ok(capabilities.permissions.includes('allow-backend-request'));
 assert.ok(capabilities.permissions.includes('allow-runtime-info'));
+const updater = await json('src-tauri/updater.json');
+assert.equal(base.plugins.updater.pubkey, updater.publicKey);
+assert.deepEqual(base.plugins.updater.endpoints, updater.endpoints);
+assert.equal(base.plugins.updater.requireSignedVersion, true);
+assert.deepEqual(updater.endpoints, [`https://github.com/${updater.repository}/releases/download/${updater.channelTag}/latest.json`]);
+assert.deepEqual((await json('src-tauri/capabilities/windows-updater.json')).platforms, ['windows']);
+assert.deepEqual((await json('src-tauri/capabilities/android-updater.json')).platforms, ['android']);
 
 for (const filename of base.bundle.icon) await access(path.join(root, 'src-tauri', filename));
 for (const filename of await readdir(path.join(root, 'src'))) {

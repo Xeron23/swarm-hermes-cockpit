@@ -32,6 +32,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check && npm test && npm run web:build
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify updater signature validation
+        run: cargo test --locked --manifest-path scripts/updater-verifier/Cargo.toml
       - name: Verify frontend source identity
         run: node scripts/check-build-info.mjs
       - name: Plan release
@@ -85,6 +88,10 @@ jobs:
           }
           New-Item -ItemType Directory -Path release-assets -Force | Out-Null
           Copy-Item -LiteralPath $files.FullName -Destination release-assets
+      - name: Sign and verify Windows updater packages
+        run: node scripts/sign-updates.mjs release-assets
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       - uses: actions/upload-artifact@v4
         with:
           name: release-windows
@@ -97,6 +104,11 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    permissions:
+      contents: write
+    concurrency:
+      group: hermes-android-signing-identity
+      cancel-in-progress: false
     env:
       ANDROID_NDK_VERSION: 26.1.10909125
     steps:
@@ -117,7 +129,7 @@ jobs:
           packages: platform-tools
       - name: Install SDK matching the pinned Tauri CLI template
         run: |
-          sdkmanager --install "platforms;android-37.0" "build-tools;37.0.0" "ndk;$ANDROID_NDK_VERSION"
+          sdkmanager --install "platforms;android-36" "platforms;android-37.0" "build-tools;37.0.0" "ndk;$ANDROID_NDK_VERSION"
           echo "NDK_HOME=$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -134,6 +146,11 @@ jobs:
       - run: npm ci
       - name: Generate Android project
         run: npx tauri android init --ci --skip-targets-install
+      - name: Restore durable Android signing identity
+        run: node scripts/android-signing.mjs restore
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       - name: Build Android APK
         run: npx tauri android build --apk --debug --target aarch64 --ci -- --locked
       - name: Verify frontend source identity after native build
@@ -161,10 +178,19 @@ jobs:
           for apk in release-assets/*.apk; do
             "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --verbose "$apk"
           done
+      - name: Preserve Android signing identity privately
+        run: node scripts/android-signing.mjs save
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      - name: Sign and verify Android updater package
+        run: node scripts/sign-updates.mjs release-assets
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       - uses: actions/upload-artifact@v4
         with:
           name: release-android
-          path: release-assets/*.apk
+          path: release-assets/*
           if-no-files-found: error
           retention-days: 14
 
@@ -175,6 +201,9 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
+    concurrency:
+      group: hermes-public-release-promotion
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
@@ -187,7 +216,12 @@ jobs:
           pattern: release-*
           path: release-assets
           merge-multiple: true
+      - run: npm ci
       - name: Publish only after all platform assets are ready
         run: node scripts/release.mjs publish release-assets
         env:
           GH_TOKEN: ${{ github.token }}
+      - name: Mirror packages and promote the public update channel
+        run: node scripts/publish-public.mjs release-assets
+        env:
+          PUBLIC_RELEASE_TOKEN: ${{ secrets.PUBLIC_RELEASE_TOKEN }}

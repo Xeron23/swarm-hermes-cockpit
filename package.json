@@ -1,6 +1,6 @@
 {
   "name": "hermes-cockpit-tauri",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "type": "module",
   "description": "Hermes mission control client for Windows and Android",
@@ -21,16 +21,18 @@
     "android:build": "tauri android build --apk",
     "android:build:debug": "tauri android build --debug --apk",
     "icons": "tauri icon src-tauri/icons/source.png --output src-tauri/icons",
-    "test": "node --test scripts/client.test.mjs scripts/release.test.mjs scripts/diagnostics.test.mjs scripts/windows-native.test.mjs && node scripts/test-native.mjs"
+    "test": "node --test scripts/updater.test.mjs scripts/public-release.test.mjs scripts/client.test.mjs scripts/release.test.mjs scripts/diagnostics.test.mjs scripts/windows-native.test.mjs && node scripts/test-native.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.4",
     "@tauri-apps/plugin-clipboard-manager": "2.5.0",
+    "@tauri-apps/plugin-updater": "2.14.0",
     "@tauri-apps/plugin-websocket": "2.5.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.12.4",
     "ajv": "8.17.1",
+    "semver": "7.7.3",
     "vite": "8.3.5"
   }
 }

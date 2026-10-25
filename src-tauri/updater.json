@@ -1,0 +1,8 @@
+{
+  "repository": "Xeron23/hermes-cockpit-releases",
+  "channelTag": "updates",
+  "publicKey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEMzMDJCNjk5NTlEMkZFQUIKUldTci90SlptYllDd3pOYXpiODlaZThTK0hrSjcwQXFzSnU0cUtxdDRTd2NNYWJCK3pWd1F1Tm0K",
+  "endpoints": [
+    "https://github.com/Xeron23/hermes-cockpit-releases/releases/download/updates/latest.json"
+  ]
+}

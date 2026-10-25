@@ -118,7 +118,7 @@ with sync_playwright() as p:
         expect(page.locator('.mission-card')).to_have_count(0)
         assert not backend.requests, 'Unpaired client must not authenticate with old/demo credentials'
         page.get_by_label('Backend status').click()
-        expect(page.get_by_role('dialog')).to_contain_text('0.1.4')
+        expect(page.get_by_role('dialog')).to_contain_text('0.1.5')
         expect(page.get_by_role('dialog')).to_contain_text('Browser fetch + WebSocket')
         page.get_by_role('button', name='Uji API tanpa pairing').click()
         expect(page.locator('#connection-diagnostics')).to_contain_text('API dapat dijangkau')
