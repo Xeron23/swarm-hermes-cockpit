@@ -87,6 +87,8 @@ npm run android:build:debug -- --target aarch64
 
 SDK CI mengikuti template CLI Tauri yang dikunci: platform Android 37.0, Build-Tools 37.0.0, NDK 26.1.10909125, dan JDK 21. File APK ditemukan dari output build dan diperiksa isi ARM64 serta signature-nya, sehingga publikasi tidak bergantung pada satu nama/path APK tertentu.
 
+Tes native Windows dikompilasi terpisah lalu dijalankan melalui `node scripts/test-windows-native.mjs`. Helper memakai Windows SDK `mt.exe` untuk menanam dan memverifikasi manifest Common Controls v6 pada executable unit test; semua tes tetap wajib lulus sebelum publikasi. Rincian ada pada [startup tes Windows](docs/WINDOWS_NATIVE_TESTS.md).
+
 ## Pengujian integrasi browser
 
 Dengan Python Playwright dan Chromium terpasang, jalankan Vite atau production preview, lalu:
