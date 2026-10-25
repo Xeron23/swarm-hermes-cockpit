@@ -36,22 +36,25 @@ jobs:
         run: npm run web:build
 
       - name: Build Tauri Windows App
-        run: npx tauri build
+        run: npx tauri build --bundles msi,nsis
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create or Update GitHub Release and Upload Windows Artifacts
+        shell: bash
         run: |
-          $TAG_NAME = $env:GITHUB_REF -replace 'refs/tags/', ''
-          if (-not $TAG_NAME -or $TAG_NAME -eq 'refs/heads/main') {
-            $TAG_NAME = 'v0.1.1'
-          }
-          Write-Host "Target Release Tag: $TAG_NAME"
-          try { gh release view $TAG_NAME } catch { gh release create $TAG_NAME --title "Hermes Cockpit $TAG_NAME" --notes "Production release for Windows & Android with full backend integration." }
-          Get-ChildItem -Path src-tauri\target\release\bundle\msi\*.msi, src-tauri\target\release\bundle\nsis\*.exe | ForEach-Object {
-            Write-Host "Uploading $_"
-            gh release upload $TAG_NAME $_.FullName --clobber
-          }
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          if [ -z "$TAG_NAME" ] || [ "$TAG_NAME" = "refs/heads/main" ]; then
+            TAG_NAME="v0.1.1"
+          fi
+          echo "Target Release Tag: $TAG_NAME"
+          gh release view "$TAG_NAME" || gh release create "$TAG_NAME" --title "Hermes Cockpit $TAG_NAME" --notes "Production release for Windows & Android with full backend integration."
+          
+          # Find and upload msi and exe
+          find src-tauri/target/release/bundle/ -type f \( -name "*.msi" -o -name "*.exe" \) | while read -r file; do
+            echo "Uploading $file"
+            gh release upload "$TAG_NAME" "$file" --clobber
+          done
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

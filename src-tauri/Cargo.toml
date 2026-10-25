@@ -1,5 +1,5 @@
 [package]
-name = "hermes-cockpit-tauri"
+name = "hermes-cockpit"
 version = "0.1.1"
 description = "Hermes multi-agent mission control demo"
 edition = "2021"
