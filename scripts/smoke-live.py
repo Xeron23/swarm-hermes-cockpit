@@ -22,6 +22,7 @@ class BackendFixture:
         self.sockets = []
         self.seq = 104
         self.health = True
+        self.pair_failure = False
         self.approvals = [{'id': 'fixture-approval', 'title': 'Fixture command', 'request_hash': 'fixture-hash-1', 'request': {'command': 'fixture-only'}}]
         self.nodes = [
             {'id': 'vps', 'name': 'Fixture server', 'os': 'linux', 'lan_ip': '192.168.1.4', 'status': 'online', 'accepting_tasks': True, 'effective_capabilities': ['exec', 'fs'], 'metrics': None, 'metrics_stale': True, 'last_seen_at': '2026-10-25T07:00:00Z', 'active_tools': 0, 'max_parallel_tools': 4, 'wake_supported': False},
@@ -35,12 +36,16 @@ class BackendFixture:
         self.requests.append((request.method, path, body))
         status = 200
         if path == '/health/ready':
+            assert request.headers.get('authorization') is None
             status = 200 if self.health else 503
-            value = {'status': 'ok'} if self.health else {'error': {'code': 'NOT_READY', 'message': 'Fixture backend unavailable', 'retryable': True}}
+            value = {'status': 'ok', 'service': 'api', 'version': '1.0.0'} if self.health else {'error': {'code': 'NOT_READY', 'message': 'Fixture backend unavailable', 'retryable': True}}
         elif path == '/api/v1/auth/pair':
             assert body['pairing_code'] == 'A' * 26
             assert request.headers.get('authorization') is None
             value = {'access_token': 'fixture-access', 'refresh_token': 'fixture-refresh', 'workspace_id': 'fixture-workspace', 'device_id': 'fixture-device', 'expires_in': 900}
+            if self.pair_failure:
+                status = 400
+                value = {'error': {'code': 'INVALID_PAIRING_CODE', 'message': f"Code {body['pairing_code']} expired", 'retryable': False}}
         else:
             assert request.headers.get('authorization') == 'Bearer fixture-access', path
             if path == '/api/v1/bootstrap':
@@ -109,6 +114,24 @@ with sync_playwright() as p:
         expect(page.locator('.mission-card')).to_have_count(0)
         assert not backend.requests, 'Unpaired client must not authenticate with old/demo credentials'
         page.get_by_label('Backend status').click()
+        expect(page.get_by_role('dialog')).to_contain_text('0.1.2')
+        expect(page.get_by_role('dialog')).to_contain_text('Browser fetch + WebSocket')
+        page.get_by_role('button', name='Uji API tanpa pairing').click()
+        expect(page.locator('#connection-diagnostics')).to_contain_text('API dapat dijangkau')
+        expect(page.locator('#connection-diagnostics')).to_contain_text('1.0.0')
+        assert backend.requests == [('GET', '/health/ready', None)]
+        backend.pair_failure = True
+        page.locator('#pair-code').fill('A' * 26)
+        page.locator('#device-name').fill('Fixture client')
+        page.locator('button[form="pair-form"]').click()
+        expect(page.locator('#connection-diagnostics')).to_contain_text('HTTP 400')
+        expect(page.locator('#connection-diagnostics')).to_contain_text('INVALID_PAIRING_CODE')
+        expect(page.locator('#connection-diagnostics')).to_contain_text('POST /api/v1/auth/pair')
+        assert 'A' * 26 not in page.locator('#connection-diagnostics').inner_text()
+        page.get_by_label('Close dialog', exact=True).click()
+        page.get_by_label('Backend status').click()
+        expect(page.locator('#connection-diagnostics')).to_contain_text('HTTP 400')
+        backend.pair_failure = False
         page.locator('#pair-code').fill('A' * 26)
         page.locator('#device-name').fill('Fixture client')
         page.locator('button[form="pair-form"]').click()
@@ -205,6 +228,6 @@ with sync_playwright() as p:
         expect(page.locator('.node-card')).to_have_count(2)
         assert not errors, errors
         assert not any('/power' in path for _, path, _ in backend.requests), 'No power operation should have been sent'
-        print(f'PASS {"Android viewport/touch" if mobile else "Windows viewport"}: pairing, null metrics/offline PC, filters, chat streaming/final, backend mission, escaped payload, traces/logs, real metric update, disconnect/stale state')
+        print(f'PASS {"Android viewport/touch" if mobile else "Windows viewport"}: build identity, unauthenticated health probe, redacted persistent pairing errors, pairing, null metrics/offline PC, filters, chat streaming/final, backend mission, escaped payload, traces/logs, real metric update, disconnect/stale state')
         context.close()
     browser.close()

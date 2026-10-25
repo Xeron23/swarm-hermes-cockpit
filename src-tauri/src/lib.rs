@@ -4,6 +4,8 @@ struct RuntimeInfo {
     version: &'static str,
     platform: &'static str,
     mode: &'static str,
+    commit: &'static str,
+    build_run: &'static str,
 }
 
 #[tauri::command]
@@ -13,6 +15,8 @@ fn runtime_info() -> RuntimeInfo {
         version: env!("CARGO_PKG_VERSION"),
         platform: std::env::consts::OS,
         mode: "live",
+        commit: env!("HERMES_BUILD_COMMIT"),
+        build_run: env!("HERMES_BUILD_RUN"),
     }
 }
 

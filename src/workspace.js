@@ -1,4 +1,5 @@
 import { items, sequence, compareSequence, ApiError } from './api_client.js';
+import { formatApiError } from './diagnostics.js';
 
 export const senderId = value => String(value || '').replace(/^(agent|node|user):/, '');
 export function metricRows(node) {
@@ -54,7 +55,7 @@ export class Workspace {
         delete this.state.sectionErrors[name];
       } catch (error) {
         if (epoch !== this.epoch) return;
-        this.state.sectionErrors[name] = error.message;
+        this.state.sectionErrors[name] = formatApiError(error);
         if (!this.api.accessToken) this.state.status = 'auth_required';
       }
     }));
@@ -77,7 +78,7 @@ export class Workspace {
       onStatus: (status, error) => {
         if (epoch !== this.epoch) return;
         this.state.status = status;
-        if (error) this.state.error = error.message;
+        if (error) this.state.error = formatApiError(error);
         if (status === 'connected') this.state.error = '';
         this.emit();
       },
@@ -105,7 +106,7 @@ export class Workspace {
         this.emit();
       } catch (error) {
         if (epoch !== this.epoch) return;
-        this.state.error = error.message;
+        this.state.error = formatApiError(error);
         this.state.status = this.api.accessToken && !this.api.auth?.refresh_uncertain ? 'offline' : 'auth_required';
         if (this.state.status === 'auth_required') this.api.stopTelemetry();
         this.emit();

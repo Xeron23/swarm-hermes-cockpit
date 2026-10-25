@@ -1,3 +1,12 @@
 fn main() {
+    // Include frontend changes and CI source identity in Cargo's cache inputs.
+    println!("cargo:rerun-if-changed=../dist");
+    for name in ["GITHUB_SHA", "GITHUB_RUN_NUMBER"] {
+        println!("cargo:rerun-if-env-changed={name}");
+    }
+    let commit = std::env::var("GITHUB_SHA").unwrap_or_else(|_| "local".into());
+    let run = std::env::var("GITHUB_RUN_NUMBER").unwrap_or_else(|_| "local".into());
+    println!("cargo:rustc-env=HERMES_BUILD_COMMIT={commit}");
+    println!("cargo:rustc-env=HERMES_BUILD_RUN={run}");
     tauri_build::build();
 }

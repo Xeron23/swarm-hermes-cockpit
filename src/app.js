@@ -2,9 +2,11 @@ import { hermesApi as api, items } from './api_client.js';
 import { Workspace, metricRows } from './workspace.js';
 import { $, esc } from './ui.js';
 import { render, connectionBody, actionButton, time } from './views.js';
+import { formatApiError } from './diagnostics.js';
+import { BUILD_INFO } from './build_info.js';
 
 const workspace = new Workspace(api);
-const ui = { page: 'overview', agentId: null, sessionId: null, agentFilter: 'all', eventFilter: 'all', target: 'auto', draft: '', error: '', pending: new Set(), logTraceId: null };
+const ui = { page: 'overview', agentId: null, sessionId: null, agentFilter: 'all', eventFilter: 'all', target: 'auto', draft: '', error: '', pending: new Set(), logTraceId: null, connectionDiagnostic: '' };
 let logTimer;
 function notify(message) {
   $('#toast').textContent = message;
@@ -41,14 +43,29 @@ async function run(key, task) {
   ui.error = '';
   paint();
   try { await task(); } catch (error) {
-    ui.error = error.message;
-    notify(error.message);
+    ui.error = formatApiError(error);
+    notify(ui.error);
+    if ($('#connection-diagnostics')) {
+      ui.connectionDiagnostic = ui.error;
+      $('#connection-diagnostics').textContent = ui.error;
+    }
   } finally { ui.pending.delete(key); paint(); }
 }
 function connection() {
-  sheet('Server & jaringan', 'LAN langsung atau subnet Tailscale melalui Proxmox', connectionBody(api, workspace.state), api.accessToken && workspace.state.status !== 'auth_required'
+  const footer = api.accessToken && workspace.state.status !== 'auth_required'
     ? `${actionButton('reconnect', 'Hubungkan ulang')}${actionButton('revoke-confirm', 'Cabut akses perangkat')}${actionButton('forget-confirm', 'Hapus sesi lokal')}`
-    : '<button class="primary-button" type="submit" form="pair-form">Pasangkan perangkat</button>');
+    : '<button class="primary-button" type="submit" form="pair-form">Pasangkan perangkat</button>';
+  sheet('Server & jaringan', 'LAN langsung atau subnet Tailscale melalui Proxmox', connectionBody(api, workspace.state, ui.connectionDiagnostic || workspace.state.error), `${actionButton('test-connection', 'Uji API tanpa pairing')}${footer}`);
+  window.HermesNative.getRuntimeInfo().then(info => {
+    const element = $('#native-build-info');
+    if (element) element.textContent = `${info.platform} · ${info.version} · ${info.commit || 'commit tidak tersedia'} · build ${info.build_run || 'tidak tersedia'}`;
+    const versionMismatch = info.version && BUILD_INFO.version !== 'development' && info.version !== BUILD_INFO.version;
+    const commitMismatch = info.commit && info.commit !== 'local' && BUILD_INFO.commit !== 'local' && info.commit !== BUILD_INFO.commit;
+    if ((versionMismatch || commitMismatch) && $('#connection-diagnostics')) {
+      ui.connectionDiagnostic = 'Identitas frontend dan runtime berbeda. Tutup aplikasi dan pasang installer dari build yang sama.';
+      $('#connection-diagnostics').textContent = ui.connectionDiagnostic;
+    }
+  }).catch(() => { if ($('#native-build-info')) $('#native-build-info').textContent = 'Identitas runtime belum dapat dibaca.'; });
 }
 function nodeDetail(id) {
   const node = workspace.state.nodes.find(n => n.id === id);
@@ -100,6 +117,14 @@ document.addEventListener('click', event => {
   if (action === 'agent-filter') { ui.agentFilter = button.dataset.filter; paint(); return; }
   if (action === 'event-filter') { ui.eventFilter = button.dataset.filter; paint(); return; }
   run(action, async () => {
+    if (action === 'test-connection') {
+      if ($('#connection-diagnostics')) $('#connection-diagnostics').textContent = 'Memeriksa GET /health/ready tanpa mengirim kode pairing…';
+      const health = await api.getHealth();
+      ui.connectionDiagnostic = health?.status === 'ok'
+        ? `API dapat dijangkau. Status: ok; service: ${health.service || 'tidak dilaporkan'}; versi backend: ${health.version || 'tidak dilaporkan'}. [GET /health/ready]`
+        : 'API merespons, tetapi format/status health belum menunjukkan siap. [GET /health/ready]';
+      if ($('#connection-diagnostics')) $('#connection-diagnostics').textContent = ui.connectionDiagnostic;
+    }
     if (action === 'refresh') { await workspace.refresh(); notify('Snapshot diperbarui dari backend.'); }
     if (action === 'reconnect') { close(); await workspace.connect(); }
     if (action === 'node-detail') nodeDetail(id);
@@ -182,7 +207,9 @@ document.addEventListener('submit', event => {
   run(form.id === 'chat-form' ? 'send' : form.id, async () => {
     try {
       if (form.id === 'pair-form') {
+        if ($('#connection-diagnostics')) $('#connection-diagnostics').textContent = 'Mengirim pairing ke API…';
         await api.pair(data.get('code'), data.get('device'));
+        ui.connectionDiagnostic = '';
         form.reset(); close(); await workspace.connect();
       } else {
         workspace.requireOnline();

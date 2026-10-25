@@ -50,7 +50,7 @@ Untuk tampilan web development: `npm run web:dev`. Browser memakai fetch/WebSock
 ## Pairing dan penggunaan
 
 1. Pastikan perangkat bisa menjangkau API VM melalui LAN atau subnet Tailscale.
-2. Buka **Server & jaringan**, masukkan kode pairing Base32 sekali pakai (26 karakter A–Z/2–7), lalu beri nama perangkat.
+2. Buka **Server & jaringan** dan klik **Uji API tanpa pairing** untuk memeriksa `/health/ready`. Dialog menampilkan versi/commit frontend dan runtime serta transport yang dipakai; installer Windows/Android menggunakan **Native HTTP + WebSocket**. Setelah API dapat dijangkau, masukkan kode pairing Base32 sekali pakai (26 karakter A–Z/2–7), lalu beri nama perangkat.
 3. Tunggu snapshot workspace dan WebSocket berhasil terhubung. Token tersimpan saja tidak membuat status menjadi Terhubung.
 4. Lihat Nodes untuk status dan metrik; buka Agents untuk session chat; buat misi dari Overview. Target `auto` diserahkan ke scheduler backend.
 5. Event asli muncul di Swarm selama sesi koneksi. Event dengan task ID dapat membuka traces dan log backend. Persetujuan dan pertanyaan ada pada tombol lonceng.
@@ -58,6 +58,8 @@ Untuk tampilan web development: `npm run web:dev`. Browser memakai fetch/WebSock
 Refresh token berotasi secara bersama untuk permintaan bersamaan. Jika hasil POST refresh hilang karena koneksi putus, token lama tidak dikirim ulang otomatis; pairing ulang diperlukan. Kredensial disimpan dalam penyimpanan lokal WebView per endpoint. Penyimpanan ini belum memakai Windows Credential Manager atau Android Keystore; gunakan perangkat tepercaya. Cache dan token demo versi lama tidak dimigrasikan otomatis.
 
 Saat offline, snapshot yang sudah diterima diberi label data lama dan aksi dinonaktifkan. POST tugas/aksi tidak diulang otomatis setelah kegagalan jaringan. Periksa keadaan backend sebelum mengirim ulang permintaan yang hasilnya belum diketahui. Perintah daya memerlukan konfirmasi, kemudian mengikuti otorisasi dan typed approval backend; UI menunggu laporan worker untuk mengubah status. Wake tidak dibuat-buat: kontrak yang tersedia belum menyediakan endpoint wake client.
+
+Jika Connect gagal, dialog mempertahankan pesan error beserta kode, status HTTP jika tersedia, dan endpoint. Kode pairing dan token yang diketahui disamarkan dari pesan diagnostik. Lihat [diagnosis koneksi](docs/CONNECTION_TROUBLESHOOTING.md) untuk kasus health berhasil tetapi pairing gagal.
 
 ## Build
 
@@ -77,6 +79,7 @@ npm run android:build:debug -- --target aarch64
 - Push ke `main` menjalankan validasi, lalu build installer Windows x86_64 (NSIS dan MSI) serta APK Android ARM64 debug. Setelah keduanya berhasil, satu job menerbitkan prerelease dengan tag unik `build-<run>-<commit>-<attempt>`.
 - Push tag `v<versi>` yang sesuai versi aplikasi menghasilkan rilis versi tersebut. Versi di npm, konfigurasi Tauri, dan Cargo harus sama. Versi seperti `v0.2.0-rc.1` tetap ditandai sebagai prerelease.
 - Workflow juga dapat dijalankan dari **Actions → Build and release Windows & Android → Run workflow**.
+- Setiap frontend menyertakan `build-info.json` berisi versi, commit, run, dan attempt. CI memvalidasinya terhadap sumber build. Runtime native juga menyertakan commit/run; perubahan `dist` menjadi input rebuild Cargo, dan output installer Windows lama dibersihkan sebelum bundling.
 - Setiap release menyertakan installer, APK, dan `SHA256SUMS.txt`. Draft baru dipublikasikan setelah seluruh file berhasil diunggah. Build platform yang gagal menghentikan publikasi.
 - Nama aset dinormalisasi sebelum upload (misalnya spasi pada `Hermes Cockpit` menjadi `Hermes-Cockpit`), sehingga checksum menggunakan nama file yang benar-benar diunduh. File build asli tetap dipertahankan. Pemeriksaan draft memvalidasi nama, status upload, dan ukuran setiap aset.
 - Build `main` tidak menimpa rilis versi yang sudah terbit. Tag versi yang sudah dipublikasikan dipertahankan; gunakan versi baru untuk perubahan kode.

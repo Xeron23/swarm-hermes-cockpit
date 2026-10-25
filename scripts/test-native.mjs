@@ -19,7 +19,7 @@ const nativeCalls = [];
 globalThis.isTauri = true;
 mockIPC((command, args) => {
   nativeCalls.push({ command, args });
-  if (command === 'runtime_info') return { app: 'Hermes Cockpit', version: '0.1.0', platform: 'android', mode: 'demo' };
+  if (command === 'runtime_info') return { app: 'Hermes Cockpit', version: '0.1.2', platform: 'android', mode: 'live', commit: 'fixture-commit', build_run: '14' };
   if (command === 'plugin:clipboard-manager|write_text') return null;
   throw new Error(`Unexpected native command: ${command}`);
 });
@@ -54,6 +54,29 @@ assert.deepEqual(sends[0], { id: 17, message: { type: 'Text', data: 'ping' } });
 await socket.close();
 channel.onmessage({ type: 'Text', data: 'stale replay' });
 assert.deepEqual(received, ['early replay']);
+// The packaged app must use Rust HTTP, not the WebView fetch blocked by CSP.
+const { httpFetch } = await import('../src/transport.js');
+const originalFetch = globalThis.fetch;
+let bodyRead = false;
+globalThis.fetch = () => { throw new Error('Native networking must not use WebView fetch'); };
+mockIPC((command, args) => {
+  if (command === 'plugin:http|fetch') {
+    assert.equal(args.clientConfig.url, 'http://192.168.1.4:3450/health/ready');
+    assert.equal(args.clientConfig.method, 'GET');
+    assert.equal(args.clientConfig.maxRedirections, 0);
+    return 31;
+  }
+  if (command === 'plugin:http|fetch_send') return { status: 200, statusText: 'OK', url: 'http://192.168.1.4:3450/health/ready', headers: [['content-type', 'application/json']], rid: 32 };
+  if (command === 'plugin:http|fetch_read_body') {
+    if (bodyRead) return [1];
+    bodyRead = true;
+    return [...new TextEncoder().encode('{"status":"ok"}'), 0];
+  }
+  if (command === 'plugin:http|fetch_cancel_body') return null;
+  throw new Error(`Unexpected native HTTP command: ${command}`);
+});
+try { assert.deepEqual(await (await httpFetch('http://192.168.1.4:3450/health/ready', {})).json(), { status: 'ok' }); }
+finally { globalThis.fetch = originalFetch; }
 clearMocks();
 delete globalThis.isTauri;
-console.log('PASS: clipboard/runtime IPC and native WebSocket subprotocol, early replay, ping, close (mocked)');
+console.log('PASS: clipboard/runtime, native HTTP without WebView fetch, and native WebSocket lifecycle (mocked)');

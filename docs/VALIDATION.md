@@ -4,9 +4,9 @@ Validasi perubahan dilakukan pada 25 Oktober 2026. Kontrak backend berasal dari 
 
 | Pemeriksaan | Hasil |
 | --- | --- |
-| `npm test` | 27 tes client/release lulus, ditambah tes boundary clipboard/runtime dan WebSocket native (subprotokol, replay awal, ping, close) dengan mock resmi Tauri |
+| `npm test` | 36 tes client/release/diagnostik lulus pada Node 24 dan Node 22.12; ditambah boundary clipboard/runtime, HTTP native tanpa fetch WebView, dan WebSocket native dengan mock resmi Tauri |
 | `npm run check` | Lulus: schema konfigurasi base/Windows/Android, aset, sintaks JS, versi, dan scope HTTP native |
-| `npm run web:build` | Lulus; bundle memasukkan transport HTTP/WebSocket native secara dinamis |
+| `npm run web:build` | Lulus untuk 0.1.2; transport native dinamis dan manifest identitas build tervalidasi |
 | Browser development, viewport desktop | Lulus terhadap fixture kontrak |
 | Browser development, viewport Android/touch | Lulus terhadap fixture kontrak, dengan motion normal |
 | Browser production preview, viewport desktop dan Android/touch | Lulus terhadap fixture kontrak |
@@ -23,6 +23,10 @@ Validasi perubahan dilakukan pada 25 Oktober 2026. Kontrak backend berasal dari 
 Tes unit memeriksa scope endpoint, Base32 pairing, rotasi refresh bersamaan, respons refresh hilang, token reuse/revocation, logout saat refresh berjalan, mutasi tanpa retry buta, error typed approval, sequence besar, deduplikasi/reconnect, snapshot workspace yang salah, metrik null, serta rekonsiliasi delta/final message.
 
 Tes integrasi browser memeriksa keadaan belum dipasangkan tanpa node/mission contoh, pairing, snapshot, PC offline, metrik null, filter sentuh, session/chat streaming, mission backend dengan target auto, escaping payload, traces/log, pembaruan metrik dari event, serta keadaan terputus/data lama. Tes juga menolak approval ketika request hash berubah setelah dialog dibuka, lalu memverifikasi keputusan untuk hash yang benar-benar ditinjau.
+
+Regresi koneksi 0.1.2 diuji pada production preview desktop dan mobile/touch: versi tampil, uji health mengirim GET tanpa Authorization maupun pairing, respons pairing HTTP 400 menampilkan kode/status/endpoint tanpa nilai kode pairing, dan error tetap tersedia setelah dialog ditutup lalu dibuka. Tes unit membedakan penolakan scope, izin native, koneksi ditolak, timeout, dan kegagalan fetch browser, serta menolak manifest versi/commit/run yang salah.
+
+Pengguna berhasil membuka health API dari PC Windows dan menerima `status: ok`, `database: ok`, serta `runtime_binding: ok`. Ini membuktikan akses HTTP dari PC tersebut, sedangkan pairing dan telemetry native pada perangkat pengguna masih perlu diverifikasi. Kode lama di commit `172b051` memakai fetch WebView dan menampilkan `Pairing failed: ${err.message}`. Reproduksi dengan CSP native yang sama menghasilkan `Pairing failed: Failed to fetch` tanpa request backend. Pengujian cache lokal tetap mengompilasi ulang aplikasi setelah perubahan frontend; cache belum terbukti menjadi penyebab installer yang dilaporkan pengguna.
 
 Tes release memeriksa tag prerelease unik untuk push/rerun, kecocokan tag versi, keberadaan seluruh platform sebelum kontak GitHub, unggahan draft sebelum publikasi, draft tidak lengkap tetap tidak dipublikasikan, penanganan akses GitHub yang ditolak, dan perlindungan rilis versi yang sudah terbit.
 

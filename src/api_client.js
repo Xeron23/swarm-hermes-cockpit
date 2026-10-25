@@ -1,9 +1,11 @@
 import { SERVER_URL, httpFetch, openSocket } from './transport.js';
+import { isTauri } from '@tauri-apps/api/core';
+import { transportFailure, redactDiagnostic } from './diagnostics.js';
 
 export class ApiError extends Error {
-  constructor(message, { status = 0, code = 'NETWORK_ERROR', retryable = false, details = {} } = {}) {
+  constructor(message, { status = 0, code = 'NETWORK_ERROR', retryable = false, details = {}, endpoint, method } = {}) {
     super(message);
-    Object.assign(this, { name: 'ApiError', status, code, retryable, details });
+    Object.assign(this, { name: 'ApiError', status, code, retryable, details, endpoint, method });
   }
 }
 const AUTH_KEY = 'hermes_auth_v2';
@@ -71,11 +73,17 @@ export class HermesApiClient {
       });
       return value;
     } catch (error) {
-      if (error instanceof ApiError) throw error;
       const mutation = options.method && !['GET', 'HEAD'].includes(options.method);
-      throw new ApiError(mutation
-        ? 'Koneksi terputus. Hasil permintaan belum diketahui; periksa status sebelum mengirim ulang.'
-        : 'Server belum dapat dijangkau. Periksa LAN atau koneksi dan subnet route Tailscale.', { code: controller.signal.aborted ? 'TIMEOUT' : 'NETWORK_ERROR', retryable: !mutation });
+      const diagnostic = error instanceof ApiError ? error : (() => {
+        const value = transportFailure(error, { timedOut: controller.signal.aborted, mutation, native: isTauri() });
+        return new ApiError(value.message, value);
+      })();
+      let body;
+      try { body = JSON.parse(options.body || '{}'); } catch { body = {}; }
+      diagnostic.message = redactDiagnostic(diagnostic.message, [this.accessToken, this.auth?.refresh_token, body.pairing_code, body.refresh_token, body.access_token]);
+      diagnostic.endpoint = endpoint.split('?')[0];
+      diagnostic.method = options.method || 'GET';
+      throw diagnostic;
     } finally { clearTimeout(timer); }
   }
   async request(endpoint, options = {}) {
@@ -189,7 +197,7 @@ export class HermesApiClient {
         await beforeConnect();
         if (!current()) { if (!this.accessToken) onStatus('auth_required'); return; }
         const ticket = await this.request('/api/v1/auth/ws-ticket', { method: 'POST', body: '{}' });
-        if (typeof ticket?.ticket !== 'string' || ticket.subprotocol !== 'hermes.telemetry.v1') throw new ApiError('Tiket telemetry tidak valid.', { code: 'INVALID_RESPONSE' });
+        if (typeof ticket?.ticket !== 'string' || ticket.subprotocol !== 'hermes.telemetry.v1') throw new ApiError('Tiket telemetry tidak valid.', { code: 'INVALID_RESPONSE', endpoint: '/api/v1/auth/ws-ticket', method: 'POST' });
         if (!current()) { if (!this.accessToken) onStatus('auth_required'); return; }
         const url = `${this.baseUrl.replace(/^http/, 'ws')}/ws/telemetry?ticket=${encodeURIComponent(ticket.ticket)}&after_seq=${encodeURIComponent(this.lastEventSeq)}`;
         let closed = false;
@@ -207,6 +215,9 @@ export class HermesApiClient {
             if (this.seen.size > 2000) this.seen.delete(this.seen.values().next().value);
             onEvent(event);
           }
+        }).catch(error => {
+          const failure = transportFailure(error, { native: isTauri() });
+          throw new ApiError(`Telemetry: ${failure.message}`, { ...failure, code: failure.code === 'NETWORK_ERROR' ? 'WS_HANDSHAKE_FAILED' : failure.code, endpoint: '/ws/telemetry', method: 'GET' });
         });
         if (!current() || attempt !== connectionEpoch || closed) { await socket.close(); return; }
         this.socket = socket;

@@ -32,6 +32,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check && npm test && npm run web:build
+      - name: Verify frontend source identity
+        run: node scripts/check-build-info.mjs
       - name: Plan release
         id: release
         run: node scripts/release.mjs metadata
@@ -55,8 +57,16 @@ jobs:
           workspaces: src-tauri -> target
           key: windows-x86_64
       - run: npm ci
+      - name: Remove cached installer outputs
+        shell: pwsh
+        run: |
+          if (Test-Path src-tauri/target/release/bundle) {
+            Remove-Item src-tauri/target/release/bundle -Recurse -Force
+          }
       - name: Build NSIS and MSI
         run: npx tauri build --ci --bundles msi,nsis -- --locked
+      - name: Verify frontend source identity after native build
+        run: node scripts/check-build-info.mjs
       - name: Collect Windows installers
         shell: pwsh
         run: |
@@ -119,6 +129,8 @@ jobs:
         run: npx tauri android init --ci --skip-targets-install
       - name: Build Android APK
         run: npx tauri android build --apk --debug --target aarch64 --ci -- --locked
+      - name: Verify frontend source identity after native build
+        run: node scripts/check-build-info.mjs
       - name: Collect and verify ARM64 APKs
         run: |
           python3 - <<'PY'
