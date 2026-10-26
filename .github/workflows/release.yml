@@ -25,13 +25,18 @@ jobs:
     outputs:
       tag: ${{ steps.release.outputs.tag }}
       updater_signing: ${{ steps.signing.outputs.enabled }}
+      android_signing_mode: ${{ steps.signing.outputs.mode }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - name: Validate persistent APK signing and plan optional updater signing
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Plan Android APK signing and optional updater signing
         id: signing
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -44,9 +49,11 @@ jobs:
           node --input-type=module <<'JS'
           import { appendFileSync } from 'node:fs';
           import { signingInputs, decodeKeystore } from './scripts/android-release.mjs';
-          decodeKeystore(signingInputs(process.env).base64);
+          const input = signingInputs(process.env);
+          if (input.base64) decodeKeystore(input.base64);
           const enabled = Boolean(process.env.TAURI_SIGNING_PRIVATE_KEY);
-          appendFileSync(process.env.GITHUB_OUTPUT, `enabled=${enabled}\n`);
+          appendFileSync(process.env.GITHUB_OUTPUT, `enabled=${enabled}\nmode=${input.mode}\n`);
+          console.log(`Android APK signing mode: ${input.mode}`);
           console.log(enabled ? 'Release mode: signed updater' : 'Release mode: bootstrap installers (updater signing not configured)');
           JS
       - run: npm ci
@@ -108,6 +115,7 @@ jobs:
           New-Item -ItemType Directory -Path release-assets -Force | Out-Null
           Copy-Item -LiteralPath $files.FullName -Destination release-assets
       - name: Sign and verify Windows updater packages
+        if: ${{ needs.validate.outputs.updater_signing == 'true' }}
         run: node scripts/sign-updates.mjs release-assets
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -125,6 +133,9 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    concurrency:
+      group: hermes-android-bootstrap-signing-identity
+      cancel-in-progress: false
     env:
       ANDROID_NDK_VERSION: 28.2.13676358
       ANDROID_BUILD_TOOLS_VERSION: 37.0.0
@@ -138,6 +149,22 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
+      - name: Restore bootstrap debug identity from the existing cache
+        id: bootstrap-cache
+        if: ${{ needs.validate.outputs.android_signing_mode == 'bootstrap-debug' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: hermes-android-debug-keystore-v1
+      - name: Prepare bootstrap debug identity
+        if: ${{ needs.validate.outputs.android_signing_mode == 'bootstrap-debug' }}
+        run: node scripts/android-release.mjs bootstrap-keystore
+      - name: Save bootstrap identity before the native build
+        if: ${{ needs.validate.outputs.android_signing_mode == 'bootstrap-debug' && steps.bootstrap-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: hermes-android-debug-keystore-v1
       - uses: android-actions/setup-android@v3
         with:
           # Official repository: commandlinetools-linux-16111833_latest.zip.
@@ -161,6 +188,7 @@ jobs:
       - name: Build, align, sign and inspect optimized release APK
         run: npm run android:build
         env:
+          HERMES_UPDATER_SIGNING_REQUIRED: ${{ needs.validate.outputs.updater_signing }}
           ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
           ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
           ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
@@ -173,10 +201,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: diagnostics-android-apk
-          path: reports/android-apk-release.json
+          path: |
+            reports/android-apk-release.json
+            reports/android-apk-verification.json
           if-no-files-found: ignore
           retention-days: 14
       - name: Sign and verify Android updater package
+        if: ${{ needs.validate.outputs.updater_signing == 'true' }}
         run: node scripts/sign-updates.mjs release-assets
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}

@@ -1,16 +1,60 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { signingInputs, decodeKeystore, versionCode, configureGradle } from './android-release.mjs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { signingInputs, decodeKeystore, versionCode, configureGradle, prepareBootstrapKeystore, verificationConfig } from './android-release.mjs';
 
 const config = JSON.parse(readFileSync(new URL('../src-tauri/android-release.json', import.meta.url)));
-test('APK signing requires a durable identity even when updater signing is optional', () => {
-  assert.throws(() => signingInputs({}), /No new identity/);
+test('no-secrets bootstrap plans a debug identity without requiring Base64', () => {
+  const input = signingInputs({});
+  assert.equal(input.mode, 'bootstrap-debug');
+  assert.equal(input.base64, undefined);
+  assert.equal(input.alias, 'androiddebugkey');
+});
+test('configured signing takes priority and partial configuration never falls back', () => {
   const identity = signingInputs({ ANDROID_DEBUG_KEYSTORE_BASE64: 'YQ==' });
+  assert.equal(identity.mode, 'legacy-secret');
   assert.equal(identity.alias, 'androiddebugkey');
   assert.equal(identity.storePassword, 'android');
   assert.throws(() => signingInputs({ ANDROID_RELEASE_KEYSTORE_BASE64: 'YQ==', ANDROID_DEBUG_KEYSTORE_BASE64: 'YQ==' }), /cannot fall back/);
+  assert.throws(() => signingInputs({ ANDROID_RELEASE_KEY_ALIAS: 'partial' }), /cannot fall back/);
+  const release = signingInputs({ ANDROID_RELEASE_KEYSTORE_BASE64: 'YQ==', ANDROID_RELEASE_STORE_PASSWORD: 'fixture', ANDROID_RELEASE_KEY_ALIAS: 'fixture', ANDROID_RELEASE_KEY_PASSWORD: 'fixture', ANDROID_DEBUG_KEYSTORE_BASE64: 'other' });
+  assert.equal(release.mode, 'release-secret');
+});
+test('signed updater cannot use an unpinned bootstrap fallback', () => {
+  assert.throws(() => signingInputs({ TAURI_SIGNING_PRIVATE_KEY: 'fixture' }), /persistent Android/);
+  assert.throws(() => signingInputs({ HERMES_UPDATER_SIGNING_REQUIRED: 'true' }), /persistent Android/);
+  assert.equal(signingInputs({ HERMES_UPDATER_SIGNING_REQUIRED: 'false' }).mode, 'bootstrap-debug');
+});
+test('only bootstrap uses a runtime certificate; secret modes retain the historical pin', () => {
+  const fingerprint = 'a'.repeat(64);
+  const before = JSON.stringify(config);
+  assert.equal(verificationConfig(config, signingInputs({}), fingerprint).certificateSha256, fingerprint);
+  assert.equal(JSON.stringify(config), before);
+  for (const mode of ['release-secret', 'legacy-secret']) {
+    assert.throws(() => verificationConfig(config, { mode }, fingerprint), /differs/);
+    assert.equal(verificationConfig(config, { mode }, config.certificateSha256).certificateSha256, config.certificateSha256);
+  }
+  assert.throws(() => verificationConfig(config, { mode: 'unknown' }, fingerprint), /policy/);
+});
+test('real JDK creates bootstrap identity once, reuses bytes and never replaces a corrupt key', t => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'hermes-bootstrap-test-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const filename = path.join(directory, 'debug.keystore');
+  const first = prepareBootstrapKeystore({ filename });
+  const bytes = readFileSync(filename);
+  const second = prepareBootstrapKeystore({ filename });
+  assert.equal(first.created, true);
+  assert.equal(second.created, false);
+  assert.equal(first.fingerprint, second.fingerprint);
+  assert.deepEqual(readFileSync(filename), bytes);
+  const other = prepareBootstrapKeystore({ filename: path.join(directory, 'other.keystore') });
+  assert.notEqual(other.fingerprint, first.fingerprint);
+  writeFileSync(filename, 'corrupt identity');
+  assert.throws(() => prepareBootstrapKeystore({ filename }), /never overwritten/);
+  assert.equal(readFileSync(filename, 'utf8'), 'corrupt identity');
 });
 test('keystore decoding rejects damaged input rather than silently replacing the identity', () => {
   assert.equal(decodeKeystore('YQ==\n').toString(), 'a');

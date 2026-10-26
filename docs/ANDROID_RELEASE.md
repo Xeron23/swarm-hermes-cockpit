@@ -46,14 +46,18 @@ Bandingkan APK yang benar-benar dipakai pengguna sebelum rollout.
 Untuk upgrade tanpa uninstall, **gunakan private key/keystore asli dengan sertifikat yang sama**.
 Build type release tidak mewajibkan mengganti sertifikat: APK release non-debug boleh ditandatangani dengan identitas lama untuk kompatibilitas distribusi GitHub.
 Sertifikat debug lama merupakan kompromi migrasi, bukan identitas signing baru untuk publikasi Google Play.
-Wrapper tidak menghasilkan debug keystore baru dan tidak mengandalkan cache Actions untuk identitas distribusi.
+Mode `release-secret`/`legacy-secret` tetap memakai identitas yang dipin.
+Mode bootstrap tanpa Minisign memulihkan `~/.android/debug.keystore` dari cache, atau membuatnya jika belum ada.
+APK tetap variant release non-debug; jenis sertifikat tidak mengubah optimasi Cargo/Gradle.
+Cache bersifat best-effort: jika key berubah, upgrade instalasi lama dapat gagal certificate mismatch.
 
 Jika masih ada secret `ANDROID_DEBUG_KEYSTORE_BASE64`, wrapper dapat memakainya sementara dengan alias `androiddebugkey` dan password `android`.
 Fingerprint tetap diverifikasi; secret yang menunjuk debug keystore berbeda akan ditolak.
 Migrasikan secret tersebut ke empat `ANDROID_RELEASE_*` berikut dengan **isi keystore yang sama**.
 Nama secret yang baru tidak mengubah sertifikat.
 
-Jika keystore hanya ada di cache lama/draft privat, pulihkan secara privat oleh maintainer sebelum menjalankan pipeline baru.
+Untuk mode persisten, jika keystore hanya ada di cache lama/draft privat, pulihkan secara privat oleh maintainer.
+Bootstrap mencoba memakai cache lama `hermes-android-debug-keystore-v1` secara otomatis, tanpa memerlukan secret.
 Jangan mencetak Base64/password ke log atau mengunggah keystore sebagai release asset/artifact biasa.
 Helper lama `scripts/android-signing.mjs` dipertahankan untuk pemulihan backup historis privat, tetapi tidak dipanggil pipeline baru.
 Jangan hapus backup historis sebelum backup offline sudah teruji.
@@ -88,8 +92,13 @@ Di Settings → Secrets and variables → Actions, tetapkan:
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Password kunci updater bila ada |
 
 Jika secret release utama sudah diisi tetapi password/alias belum lengkap, build gagal; tidak ada fallback diam-diam.
-Semua APK release, termasuk bootstrap, memerlukan identitas Android persisten.
-Jika belum ada secret Android yang sesuai, validasi berhenti dengan pesan konfigurasi, bukan menerbitkan APK dengan sertifikat baru.
+Tanpa seluruh secrets signing, bootstrap tetap dapat dibangun memakai fallback debug keystore.
+Jika `TAURI_SIGNING_PRIVATE_KEY` diaktifkan, keystore Android persisten kembali wajib; fallback bootstrap ditolak.
+Keystore bootstrap dibuat acak, bukan diturunkan secara deterministik dari nama repo/commit/password.
+Actions cache hanya untuk identitas bootstrap yang tidak dipercaya sebagai production signing key; cache dapat dihapus dan dapat dibaca workflow PR yang memiliki akses.
+Jangan menyimpan keystore production atau password privat dalam cache.
+Jalankan pertama di `main` agar cache berada pada default-branch scope; cache yang dibuat hanya pada suatu tag tidak menjamin bisa dibaca `main`.
+Restore/prepare/save dilakukan sebelum native build agar key dapat dipakai lagi walaupun build native kemudian gagal.
 
 Untuk aplikasi yang **belum pernah didistribusikan**, buat kunci app signing mandiri di luar repository:
 
@@ -137,7 +146,7 @@ npm run android:build
 # Periksa lagi byte APK final; ambil versionCode aktual dari reports/android-apk-release.json.
 python3 scripts/verify-android-apk.py \
   release-assets/hermes-cockpit-android-arm64-release.apk \
-  --config src-tauri/android-release.json \
+  --config reports/android-apk-verification.json \
   --version-code 1002701 --version-name 0.1.5 \
   --build-tools "$ANDROID_HOME/build-tools/37.0.0" \
   --report reports/android-apk-release.json
@@ -150,7 +159,11 @@ Python 3 dibutuhkan oleh pengujian/verifier APK. Windows dapat memakai environme
 Verifier menolak ukuran di atas 40 MiB, APK debuggable/testOnly, ABI tambahan, versi/package ID salah,
 izin updater hilang, simbol `.debug_*`/`.symtab`, sertifikat berbeda, atau alignment yang salah.
 Budget 40 MiB adalah batas awal untuk mencegah regresi, **bukan klaim ukuran hasil build yang sudah diukur**.
-Laporan berisi SHA-256, ukuran byte, native sections, ABI, versi dan fingerprint; tidak berisi keystore/password.
+Laporan juga mencatat `signingMode` dan `certificatePinMatched`.
+`reports/android-apk-verification.json` menyimpan konfigurasi pemeriksaan non-rahasia yang benar-benar dipakai wrapper.
+Pada bootstrap, fingerprint verifikasi mengikuti signer build tersebut; pin historis di source tidak ditulis ulang.
+Pada mode secret, fingerprint tetap wajib cocok dengan pin historis.
+Kedua laporan tidak berisi keystore/password.
 Artifact `diagnostics-android-apk` terpisah dari `release-*` agar laporan tidak menjadi input publisher.
 
 Uji upgrade nyata pada perangkat yang sudah memiliki APK lama:

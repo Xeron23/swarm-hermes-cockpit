@@ -37,7 +37,10 @@ Error feed GitHub tetap error updater dan tidak menghapus sesi workspace.
 APK release sekarang dibangun/di-strip/dioptimasi sebagai ARM64, disejajarkan dan ditandatangani
 **Android APK signing** sebelum `scripts/sign-updates.mjs` membuat signature **Minisign**.
 Kedua kunci berbeda dan keduanya dibutuhkan untuk jalur in-app Android yang lengkap.
-APK bootstrap juga wajib memakai keystore Android persisten; tidak ada fallback ke identitas acak.
+Tanpa secrets Android dan tanpa Minisign, APK bootstrap memakai debug keystore yang dipulihkan
+dari cache atau dibuat jika belum ada. APK tetap release non-debug dan tidak menghasilkan feed installable.
+Jika Minisign diaktifkan, keystore Android persisten yang cocok dengan pin sertifikat wajib tersedia;
+fallback bootstrap tidak dipakai untuk signed updater. Cache bootstrap bukan penyimpanan kunci production.
 
 Ikuti [APK Android release](ANDROID_RELEASE.md) untuk secrets `ANDROID_RELEASE_*`, fingerprint
 sertifikat, versionCode dan migrasi debug ke release tanpa mengganti identitas yang sudah dipasang.
