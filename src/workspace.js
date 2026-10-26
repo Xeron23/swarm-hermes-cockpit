@@ -25,11 +25,12 @@ export class Workspace {
     this.epoch = 0;
   }
   empty() {
-    return { status: this.api?.accessToken ? 'connecting' : 'unpaired', connectionStage: null, workspaceId: null, error: '', updatedAt: null, nodes: [], agents: [], missions: [], activeMissions: [], missionHistory: [], missionDetailsById: {}, sessions: [], messages: {}, events: [], features: {}, approvals: [], questions: [], sectionErrors: {} };
+    return { status: this.api?.accessToken ? 'connecting' : this.api?.authenticationRequired ? 'auth_required' : 'unpaired', connectionStage: null, workspaceId: null, error: '', updatedAt: null, nodes: [], agents: [], missions: [], activeMissions: [], missionHistory: [], missionDetailsById: {}, sessions: [], messages: {}, events: [], features: {}, approvals: [], questions: [], sectionErrors: {} };
   }
   subscribe(listener) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   emit() { for (const listener of this.listeners) listener(this.state); }
-  get writable() { return this.state.status === 'connected' && this.state.features.real_mode === true && this.state.features.runtime_ready === true; }
+  get disconnectedStatus() { return this.api.authenticationRequired ? 'auth_required' : this.api.accessToken ? 'offline' : 'unpaired'; }
+  get writable() { return this.state.status === 'connected' && Boolean(this.api.accessToken) && !this.api.auth?.refresh_uncertain && this.state.features.real_mode === true && this.state.features.runtime_ready === true; }
   requireOnline() {
     if (!this.writable) throw new ApiError('Tunggu backend dan telemetry siap sebelum mengirim perintah.', { code: 'NOT_READY' });
   }
@@ -73,7 +74,7 @@ export class Workspace {
       } catch (error) {
         if (epoch !== this.epoch) return;
         this.state.sectionErrors[name] = formatApiError(error);
-        if (!this.api.accessToken) this.state.status = 'auth_required';
+        if (!this.api.accessToken || error.code === 'REFRESH_UNCERTAIN') this.state.status = this.disconnectedStatus;
       }
     }));
     if (epoch === this.epoch) this.emit();
@@ -81,7 +82,7 @@ export class Workspace {
   async connect() {
     this.disconnect(false);
     if (this.state.workspaceId && this.state.workspaceId !== this.api.workspaceId) this.state = this.empty();
-    if (!this.api.accessToken) { this.state.status = 'unpaired'; this.emit(); return; }
+    if (!this.api.accessToken) { this.state.status = this.disconnectedStatus; this.emit(); return; }
     const epoch = this.epoch;
     this.state.status = 'connecting';
     this.state.error = '';
@@ -118,18 +119,18 @@ export class Workspace {
   }
   async refresh() {
     if (this.refreshing) return this.refreshing;
-    if (!this.api.accessToken) return;
+    if (!this.api.accessToken) { this.state.status = this.disconnectedStatus; this.emit(); return; }
     const epoch = this.epoch;
     this.refreshing = (async () => {
       try {
         await this.snapshot();
         await this.sections();
-        if (epoch === this.epoch && this.api.socket) { this.state.status = 'connected'; this.state.error = ''; }
+        if (epoch === this.epoch && this.api.socket && !this.api.auth?.refresh_uncertain) { this.state.status = 'connected'; this.state.error = ''; }
         this.emit();
       } catch (error) {
         if (epoch !== this.epoch) return;
         this.state.error = formatApiError(error);
-        this.state.status = this.api.accessToken && !this.api.auth?.refresh_uncertain ? 'offline' : 'auth_required';
+        this.state.status = this.disconnectedStatus;
         if (this.state.status === 'auth_required') this.api.stopTelemetry();
         this.emit();
         throw error;

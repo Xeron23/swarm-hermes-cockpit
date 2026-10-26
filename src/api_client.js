@@ -1,4 +1,5 @@
 import { SERVER_URL, httpFetch, openSocket } from './transport.js';
+import { isBackendCredentialRejection } from './auth_policy.js';
 import { isTauri } from '@tauri-apps/api/core';
 import { transportFailure, redactDiagnostic } from './diagnostics.js';
 import { normalizePairingCode, pairingCodeError } from './pairing.js';
@@ -28,6 +29,7 @@ export class HermesApiClient {
     this.baseUrl = baseUrl.replace(/\/$/, '');
     Object.assign(this, { storage, fetcher, socketFactory, timeout, retryDelay });
     this.auth = null;
+    this.authRejection = null;
     this.sessionStatus = 'missing';
     this.sessionPersistence = 'unwritten';
     this.lastEventSeq = '0';
@@ -41,6 +43,7 @@ export class HermesApiClient {
       this.sessionPersistence = 'saved';
     }
   }
+  get authenticationRequired() { return !this.accessToken && this.authRejection !== null; }
   get accessToken() { return this.auth?.access_token || null; }
   get workspaceId() { return this.auth?.workspace_id || null; }
   get deviceId() { return this.auth?.device_id || null; }
@@ -48,12 +51,14 @@ export class HermesApiClient {
     if (!value?.access_token || !value?.refresh_token || !value?.workspace_id || !value?.device_id) {
       throw new ApiError('Respons autentikasi tidak lengkap.', { code: 'INVALID_RESPONSE' });
     }
+    this.authRejection = null;
     this.auth = { ...value, server: this.baseUrl };
     const saved = saveSession(this.auth, this.storage);
     this.sessionPersistence = saved.status || (saved.ok ? 'saved' : 'write_failed');
     this.sessionStatus = saved.ok ? 'valid' : 'write_failed';
   }
   clearTokens() {
+    this.authRejection = null;
     this.authEpoch++;
     this.stopTelemetry();
     this.auth = null;
@@ -62,6 +67,10 @@ export class HermesApiClient {
     this.lastEventSeq = '0';
     this.seen.clear();
     clearSession(this.storage);
+  }
+  rejectCredentials(error) {
+    this.clearTokens();
+    this.authRejection = { status: error.status, code: error.code };
   }
   async raw(endpoint, options = {}, authenticated = true) {
     const controller = new AbortController();
@@ -88,6 +97,8 @@ export class HermesApiClient {
       let body;
       try { body = JSON.parse(options.body || '{}'); } catch { body = {}; }
       diagnostic.message = redactDiagnostic(diagnostic.message, [this.accessToken, this.auth?.refresh_token, body.pairing_code, body.refresh_token, body.access_token]);
+      diagnostic.source = 'hermes-backend';
+      diagnostic.backendUrl = this.baseUrl;
       diagnostic.endpoint = endpoint.split('?')[0];
       diagnostic.method = options.method || 'GET';
       throw diagnostic;
@@ -95,12 +106,18 @@ export class HermesApiClient {
   }
   async request(endpoint, options = {}) {
     const tokenUsed = this.accessToken;
+    const epoch = this.authEpoch;
     try { return await this.raw(endpoint, options); } catch (error) {
-      if (error.status !== 401 || !this.auth?.refresh_token) throw error;
+      if (epoch !== this.authEpoch) throw error;
+      if (isBackendCredentialRejection(error, this.baseUrl)) {
+        this.rejectCredentials(error);
+        throw error;
+      }
+      if (error.status !== 401 || error.code === 'INVALID_RESPONSE' || !this.auth?.refresh_token) throw error;
       // Parallel 401s share one rotating refresh; late responses reuse its result.
       if (this.accessToken === tokenUsed) await this.refreshToken();
       try { return await this.raw(endpoint, options); } catch (retried) {
-        if (retried.status === 401) this.clearTokens();
+        if (epoch === this.authEpoch && isBackendCredentialRejection(retried, this.baseUrl, 'retry')) this.rejectCredentials(retried);
         throw retried;
       }
     }
@@ -108,7 +125,7 @@ export class HermesApiClient {
   async refreshToken() {
     if (this.refreshing) return this.refreshing;
     if (!this.auth?.refresh_token) throw new ApiError('Pasangkan perangkat terlebih dahulu.', { status: 401, code: 'UNPAIRED' });
-    if (this.auth.refresh_uncertain) throw new ApiError('Hasil rotasi token sebelumnya belum diketahui. Pasangkan ulang perangkat agar token lama tidak dipakai kembali.', { code: 'REFRESH_UNCERTAIN' });
+    if (this.auth.refresh_uncertain) throw new ApiError('Hasil rotasi token belum diketahui. Sesi perangkat tetap disimpan; pemulihan perlu diverifikasi backend sebelum refresh dapat dilanjutkan.', { code: 'REFRESH_UNCERTAIN' });
     const refreshToken = this.auth.refresh_token;
     const epoch = this.authEpoch;
     this.refreshing = (async () => {
@@ -118,10 +135,11 @@ export class HermesApiClient {
         this.setTokens(value);
       } catch (error) {
         if (epoch !== this.authEpoch) throw error;
-        if ([400, 401, 403].includes(error.status) || error.code === 'TOKEN_REUSE_DETECTED') this.clearTokens();
-        else if ((error.status === 0 || error.code === 'INVALID_RESPONSE') && this.auth) {
+        if (isBackendCredentialRejection(error, this.baseUrl, 'refresh')) this.rejectCredentials(error);
+        else if ((error.status === 0 || error.status >= 500 || error.code === 'INVALID_RESPONSE') && this.auth) {
           this.auth.refresh_uncertain = true;
-          try { this.storage?.setItem(AUTH_KEY, JSON.stringify(this.auth)); } catch { /* Keep uncertainty in memory. */ }
+          const saved = saveSession(this.auth, this.storage);
+          this.sessionPersistence = saved.status;
         }
         throw error;
       } finally { this.refreshing = null; }
@@ -208,11 +226,11 @@ export class HermesApiClient {
       const attempt = ++connectionEpoch;
       try {
         await beforeConnect();
-        if (!current()) { if (!this.accessToken) onStatus('auth_required'); return; }
+        if (!current()) { if (!this.accessToken) onStatus(this.authenticationRequired ? 'auth_required' : 'unpaired'); return; }
         onStage('ticket');
         const ticket = await this.request('/api/v1/auth/ws-ticket', { method: 'POST', body: '{}' });
         if (typeof ticket?.ticket !== 'string' || ticket.subprotocol !== 'hermes.telemetry.v1') throw new ApiError('Tiket telemetry tidak valid.', { code: 'INVALID_RESPONSE', endpoint: '/api/v1/auth/ws-ticket', method: 'POST' });
-        if (!current()) { if (!this.accessToken) onStatus('auth_required'); return; }
+        if (!current()) { if (!this.accessToken) onStatus(this.authenticationRequired ? 'auth_required' : 'unpaired'); return; }
         const url = `${this.baseUrl.replace(/^http/, 'ws')}/ws/telemetry?ticket=${encodeURIComponent(ticket.ticket)}&after_seq=${encodeURIComponent(this.lastEventSeq)}`;
         let closed = false;
         onStage('telemetry');
@@ -240,7 +258,14 @@ export class HermesApiClient {
         onStatus('connected');
         this.pingTimer = setInterval(() => { Promise.resolve(socket.send('ping')).catch(reconnect); }, 15000);
       } catch (error) {
-        if (!this.accessToken || error.code === 'REFRESH_UNCERTAIN') { onStatus('auth_required', error); return; }
+        if (!this.accessToken) {
+          onStatus(this.authenticationRequired ? 'auth_required' : 'unpaired', error);
+          return;
+        }
+        if (error.code === 'REFRESH_UNCERTAIN') {
+          onStatus('offline', error);
+          return; // Keep credentials and do not replay a possibly consumed refresh token.
+        }
         if (generation !== this.generation) return;
         onStatus('offline', error);
         reconnect();

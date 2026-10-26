@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { appendFileSync, copyFileSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
@@ -20,7 +20,7 @@ export function releaseMetadata(env, version) {
   };
 }
 
-export function prepareArtifacts(directory) {
+export function prepareArtifacts(directory, { includeFeed = false } = {}) {
   const primary = readdirSync(directory, { withFileTypes: true }).filter(entry => entry.isFile() && /\.(msi|exe|apk)$/i.test(entry.name)).map(entry => entry.name).sort();
   const signatures = primary.map(name => `${name}.sig`).filter(name => { try { return statSync(path.join(directory, name)).isFile(); } catch { return false; } });
   if (signatures.length && signatures.length !== primary.length) throw new Error('Updater signatures are incomplete; every installer and APK must be signed together.');
@@ -46,6 +46,7 @@ export function prepareArtifacts(directory) {
     copyFileSync(path.join(directory, original), file);
     return file;
   });
+  if (includeFeed) files.push(path.join(directory, 'latest.json'));
   const sums = files.map(file => `${createHash('sha256').update(readFileSync(file)).digest('hex')}  ${path.basename(file)}\n`).join('');
   writeFileSync(path.join(directory, 'SHA256SUMS.txt'), sums);
   return [...files, path.join(directory, 'SHA256SUMS.txt')];
@@ -61,7 +62,15 @@ const resolveGitTag = tag => {
 export function publishRelease({ directory, metadata, repository, gh = defaultGh, resolveTag = resolveGitTag }) {
   if (!/^[\w.-]+\/[\w.-]+$/.test(repository || '')) throw new Error('Invalid repository');
   // All platforms must be present before the first network mutation.
-  const files = prepareArtifacts(directory);
+  const feedPath = path.join(directory, 'latest.json');
+  const includeFeed = existsSync(feedPath);
+  if (includeFeed) {
+    const feed = JSON.parse(readFileSync(feedPath, 'utf8'));
+    if (feed.source_sha !== metadata.sha || !feed.version?.startsWith(`${metadata.version}+build.`)) {
+      throw new Error('Prepared update feed belongs to another source or application version.');
+    }
+  }
+  const files = prepareArtifacts(directory, { includeFeed });
   const invoke = args => {
     const result = gh([...args, '--repo', repository]);
     if (result.status !== 0) throw new Error(result.stderr?.trim() || result.error?.message || 'GitHub release operation failed');

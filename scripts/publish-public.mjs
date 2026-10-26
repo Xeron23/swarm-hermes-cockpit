@@ -32,7 +32,29 @@ export function createUpdateFeed({ files, metadata, repository, run, attempt, da
   };
 }
 
-export function publishPublicRelease({ directory, metadata, config, run, attempt, gh = args => spawnSync('gh', args, { encoding: 'utf8', env: { ...process.env, GH_TOKEN: process.env.PUBLIC_RELEASE_TOKEN || process.env.GH_TOKEN || process.env.GITHUB_TOKEN } }) }) {
+export function selectReleaseToken(env, repository) {
+  const sameRepository = env.GITHUB_REPOSITORY?.toLowerCase() === repository.toLowerCase();
+  const token = sameRepository
+    ? env.GH_TOKEN || env.GITHUB_TOKEN
+    : env.PUBLIC_RELEASE_TOKEN;
+  if (!token) throw new Error(sameRepository
+    ? 'Missing GH_TOKEN/GITHUB_TOKEN for same-repository update publication.'
+    : 'Missing PUBLIC_RELEASE_TOKEN for cross-repository update publication.');
+  return token;
+}
+
+export function preparePublicUpdate({ directory, metadata, config, run, attempt }) {
+  const files = prepareArtifacts(directory);
+  const packages = files.filter(filename => /\.(exe|msi|apk)$/i.test(filename));
+  if (!packages.length || packages.some(filename => !files.includes(`${filename}.sig`))) {
+    throw new Error('Signed packages are required before preparing an update feed.');
+  }
+  const feed = createUpdateFeed({ files, metadata, repository: config.repository, run, attempt });
+  writeFileSync(path.join(directory, 'latest.json'), JSON.stringify(feed, null, 2) + '\n');
+  return feed;
+}
+
+export function publishPublicRelease({ directory, metadata, config, run, attempt, gh = args => spawnSync('gh', args, { encoding: 'utf8', env: { ...process.env, GH_TOKEN: selectReleaseToken(process.env, config.repository) } }) }) {
   const repository = config.repository;
   if (!/^[\w.-]+\/[\w.-]+$/.test(repository) || config.channelTag !== 'updates') throw new Error('Invalid public updater repository/channel');
   let files = prepareArtifacts(directory);
@@ -101,13 +123,27 @@ export function publishPublicRelease({ directory, metadata, config, run, attempt
   } finally { rmSync(scratch, { recursive: true, force: true }); }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  if (!process.env.PUBLIC_RELEASE_TOKEN) {
-    console.log('Public release mirror is not configured. Add PUBLIC_RELEASE_TOKEN after creating the public distribution repository.');
-  } else {
-    const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
-    const config = JSON.parse(readFileSync('src-tauri/updater.json', 'utf8'));
-    const result = publishPublicRelease({ directory: process.argv[2] || 'release-assets', metadata: releaseMetadata(process.env, version), config, run: process.env.GITHUB_RUN_NUMBER, attempt: process.env.GITHUB_RUN_ATTEMPT });
-    console.log(`Public release published; signed update channel: ${result.signed ? 'enabled' : 'awaiting signing configuration'}`);
+export function runPublicRelease({ args = process.argv.slice(2), env = process.env,
+  version = JSON.parse(readFileSync('package.json', 'utf8')).version,
+  config = JSON.parse(readFileSync('src-tauri/updater.json', 'utf8')),
+  publish = publishPublicRelease, prepare = preparePublicUpdate, log = console.log } = {}) {
+  const preparing = args[0] === 'prepare';
+  const options = {
+    directory: args[preparing ? 1 : 0] || 'release-assets',
+    metadata: releaseMetadata(env, version), config,
+    run: env.GITHUB_RUN_NUMBER, attempt: env.GITHUB_RUN_ATTEMPT
+  };
+  if (preparing) {
+    const result = prepare(options);
+    log('Prepared signed latest.json before version release publication.');
+    return result;
   }
+  const token = selectReleaseToken(env, config.repository);
+  const gh = args => spawnSync('gh', args, { encoding: 'utf8', env: { ...env, GH_TOKEN: token } });
+  const result = publish({ ...options, gh });
+  if (!result.signed) throw new Error('No signed update feed was published.');
+  log(`Signed update channel: ${result.promoted ? 'promoted' : 'already current'}`);
+  return result;
 }
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) runPublicRelease();

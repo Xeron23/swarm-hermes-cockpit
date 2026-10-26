@@ -6,7 +6,9 @@ export function updateError(error) {
   if (error?.code === 'UPDATE_CERTIFICATE_MISMATCH') return 'Sertifikat APK berbeda dari aplikasi terpasang. Paket ini belum dapat dipasang sebagai pembaruan.';
   if (error?.code === 'UPDATE_PACKAGE_MISMATCH') return 'APK bukan untuk Hermes Cockpit pada perangkat ini.';
   if (/signature|signed.version|public.?key|minisign/i.test(raw) || error?.code === 'UPDATE_VERIFICATION_FAILED') return 'Tanda tangan paket tidak sesuai. Pembaruan belum dapat dipasang; periksa release resmi berikutnya.';
-  if (error?.code === 'UPDATE_FEED_NOT_READY' || /404|release.*json/i.test(raw)) return 'Belum tersedia paket pembaruan pada layanan release.';
+  if (error?.code === 'UPDATE_FEED_NOT_READY' || /404/i.test(raw)) return 'Belum tersedia paket pembaruan pada layanan release.';
+  if (error?.code === 'UPDATE_FEED_INVALID') return 'Format feed pembaruan tidak valid. Sesi perangkat tetap tersimpan.';
+  if (error?.code === 'UPDATE_PLATFORM_UNAVAILABLE') return 'Paket pembaruan untuk perangkat ini belum tersedia.';
   if (error?.code === 'UPDATE_STORAGE_ERROR') return 'Penyimpanan perangkat belum dapat menampung pembaruan.';
   if (error?.code === 'UPDATE_INSTALL_FAILED') return 'Pemasangan belum berhasil. Periksa izin pemasangan pada perangkat lalu coba lagi.';
   return 'Pembaruan belum dapat diselesaikan. Periksa koneksi internet lalu coba lagi.';
@@ -24,6 +26,10 @@ export class AppUpdater {
   emit() { for (const listener of this.listeners) listener(this.state); }
   set(value) { Object.assign(this.state, value); this.emit(); }
   get busy() { return ['checking', 'downloading', 'verifying', 'installing'].includes(this.state.status); }
+  reportError(error) {
+    // This controller owns update state only; it has no workspace/auth/storage dependency.
+    this.set({ status: 'error', error: updateError(error) });
+  }
   async start() {
     try {
       const platform = await this.service.platform();
@@ -31,7 +37,7 @@ export class AppUpdater {
       if (!supported(platform)) return;
       await this.check();
       this.timer = setInterval(() => this.check(), this.interval);
-    } catch (error) { this.set({ status: 'error', error: updateError(error) }); }
+    } catch (error) { this.reportError(error); }
   }
   async check() {
     if (!supported(this.state.platform) || this.busy || this.state.status === 'ready') return;
@@ -43,7 +49,7 @@ export class AppUpdater {
       this.update = update;
       this.set({ status: update ? 'available' : 'current', version: update?.version || null, notes: String(update?.body || ''), date: update?.date || null, checkedAt: new Date().toISOString(), bytes: 0, total: null });
       // Checking is automatic; downloading and installing require user clicks.
-    } catch (error) { this.set({ status: 'error', error: updateError(error) }); }
+    } catch (error) { this.reportError(error); }
   }
   async download() {
     if (!this.update || this.busy || this.state.status === 'ready') return;

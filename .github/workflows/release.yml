@@ -217,11 +217,17 @@ jobs:
           path: release-assets
           merge-multiple: true
       - run: npm ci
+      - name: Prepare signed feed before publishing the version release
+        run: node scripts/publish-public.mjs prepare release-assets
       - name: Publish only after all platform assets are ready
         run: node scripts/release.mjs publish release-assets
         env:
           GH_TOKEN: ${{ github.token }}
-      - name: Mirror packages and promote the public update channel
+      - name: Promote the same-repository update channel
         run: node scripts/publish-public.mjs release-assets
         env:
-          PUBLIC_RELEASE_TOKEN: ${{ secrets.PUBLIC_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+      - name: Verify anonymous public update feed
+        run: |
+          curl --fail --location --retry 3 --retry-all-errors --retry-delay 5 --output public-latest.json https://github.com/Xeron23/swarm-hermes-cockpit/releases/download/updates/latest.json
+          node -e "const f = require('./public-latest.json'); if (!f.version || !f.platforms?.['windows-x86_64'] || !f.platforms?.['android-aarch64']) throw new Error('Incomplete public update feed')"

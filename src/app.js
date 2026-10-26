@@ -194,11 +194,17 @@ document.addEventListener('click', event => {
   }
   if (action === 'agent-filter') { ui.agentFilter = button.dataset.filter; paint(); return; }
   if (action === 'event-filter') { ui.eventFilter = button.dataset.filter; paint(); return; }
+  if (action.startsWith('update-')) {
+    // Update failures never enter the workspace action/error/diagnostic handler.
+    Promise.resolve().then(async () => {
+      if (action === 'update-check') await updater.check();
+      if (action === 'update-download') await updater.download();
+      if (action === 'update-confirm') sheet('Pasang pembaruan?', updater.state.version || '', `<p>${updater.state.platform === 'android' ? 'Android akan meminta konfirmasi untuk memperbarui aplikasi.' : 'Aplikasi akan ditutup sebentar, diperbarui, lalu dibuka kembali.'}</p>${ui.draft ? '<p>Pesan yang belum dikirim akan hilang saat aplikasi ditutup.</p>' : ''}`, actionButton('update-install', 'Pasang sekarang'));
+      if (action === 'update-install') { appUpdates(); await updater.install(); }
+    }).catch(error => updater.reportError(error));
+    return;
+  }
   run(action, async () => {
-    if (action === 'update-check') await updater.check();
-    if (action === 'update-download') await updater.download();
-    if (action === 'update-confirm') sheet('Pasang pembaruan?', updater.state.version || '', `<p>${updater.state.platform === 'android' ? 'Android akan meminta konfirmasi untuk memperbarui aplikasi.' : 'Aplikasi akan ditutup sebentar, diperbarui, lalu dibuka kembali.'}</p>${ui.draft ? '<p>Pesan yang belum dikirim akan hilang saat aplikasi ditutup.</p>' : ''}`, actionButton('update-install', 'Pasang sekarang'));
-    if (action === 'update-install') { appUpdates(); await updater.install(); }
     if (action === 'test-connection') {
       if ($('#connection-diagnostics')) $('#connection-diagnostics').textContent = 'Memeriksa GET /health/ready tanpa mengirim kode pairing…';
       const health = await api.getHealth();
