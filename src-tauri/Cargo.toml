@@ -31,3 +31,11 @@ tauri-plugin-hermes-updates = { path = "plugins/hermes-updates" }
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+debug = false
+strip = true
+incremental = false

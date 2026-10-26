@@ -65,31 +65,32 @@ Jika Connect gagal, dialog menampilkan tahap health/bootstrap/tiket/handshake se
 
 ## Build
 
-Windows dan Android mendukung pembaruan dari menu **Pembaruan aplikasi**. Pemeriksaan berjalan otomatis; unduh dan pasang menunggu klik pengguna. Untuk mengaktifkan distribusi dari repository public khusus paket release dan mengatur signing, ikuti [pengaturan pembaruan](docs/UPDATES.md).
+Windows dan Android mendukung pembaruan dari menu **Pembaruan aplikasi**. Pemeriksaan berjalan otomatis; unduh dan pasang menunggu klik pengguna. Untuk distribusi melalui GitHub Releases repository ini dan pengaturan signing, ikuti [pengaturan pembaruan](docs/UPDATES.md) serta [APK Android release](docs/ANDROID_RELEASE.md).
 
 ```bash
 # Desktop pada OS target
 npm run build
 
-# Android; setelah SDK/NDK dan target Rust siap
+# Android release; setelah SDK/NDK, target Rust dan identitas APK persisten siap
+# Pada build lokal, set ANDROID_VERSION_CODE ke angka baru yang sesuai panduan.
 npm run android:init
-npm run android:build:debug -- --target aarch64
+npm run android:build
 ```
 
 `package-lock.json` dan `src-tauri/Cargo.lock` mengunci dependency client. Build Windows dilakukan di Windows; APK memerlukan toolchain Android. Installer dan APK baru belum dibuat atau diuji pada perangkat asli di cloud ini. Workflow release menjalankan pemeriksaan frontend sebelum build.
 
 ## Build dan release otomatis di GitHub
 
-- Push ke `main` menjalankan validasi, lalu build installer Windows x86_64 (NSIS dan MSI) serta APK Android ARM64 debug. Setelah keduanya berhasil, satu job menerbitkan prerelease dengan tag unik `build-<run>-<commit>-<attempt>`.
+- Push ke `main` menjalankan validasi, lalu build installer Windows x86_64 (NSIS dan MSI) serta APK Android ARM64 release teroptimasi. Setelah keduanya berhasil, satu job menerbitkan prerelease dengan tag unik `build-<run>-<commit>-<attempt>`.
 - Push tag `v<versi>` yang sesuai versi aplikasi menghasilkan rilis versi tersebut. Versi di npm, konfigurasi Tauri, dan Cargo harus sama. Versi seperti `v0.2.0-rc.1` tetap ditandai sebagai prerelease.
 - Workflow juga dapat dijalankan dari **Actions → Build and release Windows & Android → Run workflow**.
 - Setiap frontend menyertakan `build-info.json` berisi versi, commit, run, dan attempt. CI memvalidasinya terhadap sumber build. Runtime native juga menyertakan commit/run; perubahan `dist` menjadi input rebuild Cargo, dan output installer Windows lama dibersihkan sebelum bundling.
 - Setiap release menyertakan installer, APK, dan `SHA256SUMS.txt`. Draft baru dipublikasikan setelah seluruh file berhasil diunggah. Build platform yang gagal menghentikan publikasi.
 - Nama aset dinormalisasi sebelum upload (misalnya spasi pada `Hermes Cockpit` menjadi `Hermes-Cockpit`), sehingga checksum menggunakan nama file yang benar-benar diunduh. File build asli tetap dipertahankan. Pemeriksaan draft memvalidasi nama, status upload, dan ukuran setiap aset.
 - Build `main` tidak menimpa rilis versi yang sudah terbit. Tag versi yang sudah dipublikasikan dipertahankan; gunakan versi baru untuk perubahan kode.
-- APK merupakan build debug untuk pengujian perangkat. Identitas signing debug dicache di Actions; jika cache hilang, signature bisa berubah dan instalasi debug lama mungkin perlu dihapus. Signing Android produksi/Play Store dan code-signing Windows belum dikonfigurasi.
+- APK release ditandatangani menggunakan keystore persisten dari Actions secrets dan fingerprint yang dipin. Identitas lama dipertahankan untuk upgrade tanpa uninstall; cache bukan sumber identitas baru. Lihat [migrasi sertifikat dan setup signing](docs/ANDROID_RELEASE.md). Code-signing Windows dan distribusi Google Play terpisah dari APK GitHub.
 
-SDK CI mengikuti template CLI Tauri yang dikunci: platform Android 37.0, Build-Tools 37.0.0, NDK 26.1.10909125, dan JDK 21. File APK ditemukan dari output build dan diperiksa isi ARM64 serta signature-nya, sehingga publikasi tidak bergantung pada satu nama/path APK tertentu.
+SDK CI mengikuti template CLI Tauri yang dikunci: platform Android 37.0, Build-Tools 37.0.0, NDK 28.2.13676358, dan JDK 21. Wrapper menemukan satu APK release, memverifikasi ABI, versi, sertifikat, simbol native, batas ukuran dan alignment, lalu menghasilkan aset `hermes-cockpit-android-arm64-release.apk`. Laporan tersedia sebagai artifact `diagnostics-android-apk`.
 
 Tes native Windows dikompilasi terpisah lalu dijalankan melalui `node scripts/test-windows-native.mjs`. Helper memakai Windows SDK `mt.exe` untuk menanam dan memverifikasi manifest Common Controls v6 pada executable unit test; semua tes tetap wajib lulus sebelum publikasi. Rincian ada pada [startup tes Windows](docs/WINDOWS_NATIVE_TESTS.md).
 

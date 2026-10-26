@@ -1,0 +1,7 @@
+# JNI/reflection entry points and arguments of the custom updater plugin.
+-keep class io.github.xeron.hermesupdates.** { *; }
+# Tauri owns dynamic plugin registration, JS bridge methods and callbacks.
+# Preserve these small bridge namespaces; AndroidX/Material remain shrinkable.
+-keep class app.tauri.** { *; }
+-keep class app.hermes.cockpit.** { *; }
+-keepattributes RuntimeVisibleAnnotations,RuntimeInvisibleAnnotations,AnnotationDefault,InnerClasses,EnclosingMethod,Signature

@@ -1,0 +1,8 @@
+{
+  "applicationId": "app.hermes.cockpit",
+  "abi": "arm64-v8a",
+  "certificateSha256": "6dfe2b88fbceb0e71a8f3f98765215d23866c0c0abfe3a1133a27f52797dd8ba",
+  "versionCodeBase": 1000000,
+  "minimumPreviousVersionCode": 1005,
+  "maxApkBytes": 41943040
+}

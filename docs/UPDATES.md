@@ -1,33 +1,67 @@
-Hermes Cockpit updates on Windows and Android
+# Pembaruan Hermes Cockpit
 
-The client checks at startup, every six hours, and after returning online. Open **Pembaruan aplikasi** from the header or sidebar to check manually. Checking never downloads a package. **Unduh pembaruan** downloads and verifies it; **Pasang & mulai ulang** (Windows) or **Pasang APK** (Android) asks for confirmation before starting installation. Android also presents its system installer and may ask to allow installations from Hermes Cockpit. Cancelling keeps the verified APK available to retry. Pairing and application data are retained by an upgrade with the same application identity.
+Windows memakai Tauri updater resmi. Android memakai adapter Hermes yang membaca entry
+`android-aarch64` dari manifest Tauri yang sama, memverifikasi Minisign dan signed version,
+lalu memeriksa package ID/sertifikat sebelum membuka installer sistem.
 
-One-time distribution setup
+Manifest yang dikonfigurasi saat ini:
 
-Distribution uses the same repository (`Xeron23/swarm-hermes-cockpit`) by default, using Actions' `GITHUB_TOKEN` with write permissions. A separate public mirror repository is no longer required unless desired.
+`https://github.com/Xeron23/swarm-hermes-cockpit/releases/latest/download/latest.json`
 
-Release Modes (Bootstrap vs Signed)
-1. **Bootstrap Mode (Default)**:
-   - When `TAURI_SIGNING_PRIVATE_KEY` is not configured in Actions secrets, releases continue normally as bootstrap releases.
-   - Installers (`.exe`, `.msi`, `.apk`) are published to the version release draft and published publicly.
-   - Update channel promotion (`latest.json`) is skipped. In-app updater reports that updates are not yet available on the release service without dropping user sessions.
+Manifest berada di rilis versi yang sama dengan installer dan `.sig`; URL paket di dalamnya
+menunjuk tag versi/build yang immutable. Tidak ada publisher channel `updates` pada pipeline ini.
 
-2. **Signed Mode**:
-   - To enable in-app auto-updates, add `TAURI_SIGNING_PRIVATE_KEY` in **Settings → Secrets and variables → Actions**.
-   - If using a public repository, also add `ANDROID_DEBUG_KEYSTORE_BASE64` (`base64 -w 0 ~/.android/debug.keystore`).
-   - Releases will generate, sign, and promote `latest.json` to the `updates` tag.
+## Alur aplikasi
 
-Publication and signing
+Pemeriksaan startup, enam jam dan setelah online hanya membaca metadata. Menu **Pembaruan aplikasi**
+mendukung unduh saja atau unduh lalu pasang setelah konfirmasi. Paket baru installable setelah
+verifikasi signature berhasil; akhir transfer bukan bukti verifikasi. Windows dapat keluar untuk
+menjalankan installer/relaunch. Android tetap membutuhkan izin instalasi serta konfirmasi sistem.
+Cancel/permission-denied dapat dicoba lagi sesuai status paket yang sudah diverifikasi.
+Error feed GitHub tetap error updater dan tidak menghapus sesi workspace.
 
-- Every main push builds both platforms and receives an immutable release tag. The public `updates` channel is promoted only after every package/signature is uploaded and checked. Source release publication still waits for both platforms. Older or repeated builds cannot move the channel backwards. Published immutable packages are reused on reruns.
-- The client uses `https://github.com/Xeron23/hermes-cockpit-releases/releases/download/updates/latest.json`. Private source access is unnecessary on the installed client. Internet access to GitHub Releases is required in addition to the LAN/Tailscale backend connection.
-- Windows uses the official Tauri updater. Android downloads an ARM64 APK into private app cache, verifies the same Minisign signature and signed version, checks package ID and APK signing certificate, and hands a scoped FileProvider URI to the Android system installer. No silent installation or automatic uninstall is performed.
-- Metadata versions include `+build.<run>.<attempt>`. This permits updates between main builds with the same application version, without repeatedly offering the installed build. The signature authenticates that exact version, preventing a metadata-only version change from replaying an old signed package.
-- The APK currently uses the existing debug certificate, matching the release workflow. CI first reuses the original cached certificate. Once the updater key is configured, it preserves that certificate encrypted with AES-256-GCM and a domain-separated HKDF key in the private source repository's permanent **draft** release `android-signing-state`. Builds restore and verify this identity before signing. Do not delete that draft or rotate the updater key without a migration. The encrypted backup is never mirrored publicly. If the original certificate was already lost before this backup was created, it cannot be recovered by this change; Android rejects a certificate mismatch instead of deleting app data.
-- Only ARM64 Android APKs and Windows x86_64 installers are currently built, matching the existing release targets. Native installer prompts, administrator rights, and Android permissions still apply.
+## Mode publikasi
 
-To deliberately provision a different updater key **before distributing the first updater-enabled client**, run `node scripts/setup-updater-key.mjs /absolute/path/outside/repository/updater.key` and update the Actions secret to match. Replacing the key after distribution needs an explicit migration because older clients trust their embedded public key.
+- Tanpa `TAURI_SIGNING_PRIVATE_KEY`: installer bootstrap tetap terbit sebagai prerelease,
+  tanpa feed installable dan tanpa memindahkan stable latest.
+- Dengan kunci updater: semua EXE/MSI/APK harus memiliki signature yang cocok dengan public key Hermes.
+  `latest.json` disiapkan sebelum satu publisher mengunggah/mempublikasikan seluruh aset.
+- Tag stabil `v<versi>` harus cocok dengan versi aplikasi. Rilis signed yang lebih baru dapat menjadi
+  stable latest. Main build dan tag prerelease tidak menggantikannya; rilis lama/rerun tidak menimpa
+  pasangan paket/metadata immutable yang sudah terbit.
+- Actions menggunakan `github.token` dengan `contents: write` pada job publish di repository ini.
+  Secret tambahan untuk repository mirror tidak diperlukan.
 
-Validation
+## Signing Android dan Minisign
 
-`npm run check`, `npm test`, `npm run web:build`, `cargo test --locked --manifest-path scripts/updater-verifier/Cargo.toml`, native library tests, and `python3 scripts/smoke-updates.py <preview-url>` cover configuration, manual-action boundaries, both native SDK adapters, version/build ordering, real signature verification, publication ordering, and the production UI with mocked OS installation. Real Windows/Android installation must be verified with signed releases on the target devices after distribution setup.
+APK release sekarang dibangun/di-strip/dioptimasi sebagai ARM64, disejajarkan dan ditandatangani
+**Android APK signing** sebelum `scripts/sign-updates.mjs` membuat signature **Minisign**.
+Kedua kunci berbeda dan keduanya dibutuhkan untuk jalur in-app Android yang lengkap.
+APK bootstrap juga wajib memakai keystore Android persisten; tidak ada fallback ke identitas acak.
+
+Ikuti [APK Android release](ANDROID_RELEASE.md) untuk secrets `ANDROID_RELEASE_*`, fingerprint
+sertifikat, versionCode dan migrasi debug ke release tanpa mengganti identitas yang sudah dipasang.
+`ANDROID_DEBUG_KEYSTORE_BASE64` tetap diterima sebagai transisi dengan verifikasi fingerprint,
+tidak lagi bergantung pada ada/tidaknya secret Minisign atau cache debug Actions.
+Backup historis privat tetap dipertahankan; pipeline baru memakai secrets dan backup offline terpisah.
+
+Untuk updater, isi `TAURI_SIGNING_PRIVATE_KEY` dan password bila ada. Kunci harus cocok dengan
+public key yang sudah dibundel di `src-tauri/updater.json` dan `tauri.conf.json`.
+Jangan memakai kunci Warren atau menghasilkan kunci pengganti untuk memperbaiki signature mismatch.
+Helper `scripts/setup-updater-key.mjs` hanya untuk provisioning identitas baru sebelum distribusi
+pertama atau migrasi kepercayaan yang sudah dirancang secara eksplisit.
+
+Versi signature tetap `semver+build.<run>.<attempt>`, terpisah dari versionCode APK.
+Android juga menolak certificate mismatch/downgrade; signature Minisign tidak melewati batas ini.
+Binary lama yang mengunci endpoint channel lama perlu satu upgrade manual dengan sertifikat sama.
+Tidak ada uninstall otomatis, penghapusan data, atau reset pairing saat memperbarui aplikasi.
+
+## Validasi
+
+Jalankan `npm run check`, `npm test`, `npm run web:build`,
+`cargo test --locked --manifest-path scripts/updater-verifier/Cargo.toml`,
+serta build dan tes native Windows/Android sesuai toolchain.
+Pemeriksaan APK final ada di `scripts/verify-android-apk.py`; hasil CI tersimpan pada
+artifact `diagnostics-android-apk`, terpisah dari installer yang diterbitkan.
+Tes JavaScript/native IPC yang dimock tidak membuktikan instalasi OS sebenarnya.
+Uji dua build signed berurutan pada perangkat nyata, termasuk cancel, izin, relaunch dan retensi sesi.

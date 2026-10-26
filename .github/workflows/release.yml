@@ -31,19 +31,21 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Plan optional updater signing
+      - name: Validate persistent APK signing and plan optional updater signing
         id: signing
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           ANDROID_DEBUG_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
-          SOURCE_PRIVATE: ${{ github.event.repository.private }}
+          ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
         run: |
           node --input-type=module <<'JS'
           import { appendFileSync } from 'node:fs';
+          import { signingInputs, decodeKeystore } from './scripts/android-release.mjs';
+          decodeKeystore(signingInputs(process.env).base64);
           const enabled = Boolean(process.env.TAURI_SIGNING_PRIVATE_KEY);
-          if (enabled && process.env.SOURCE_PRIVATE === 'false' && !process.env.ANDROID_DEBUG_KEYSTORE_BASE64) {
-            throw new Error('Signed updates from a public source require the existing Android keystore in ANDROID_DEBUG_KEYSTORE_BASE64.');
-          }
           appendFileSync(process.env.GITHUB_OUTPUT, `enabled=${enabled}\n`);
           console.log(enabled ? 'Release mode: signed updater' : 'Release mode: bootstrap installers (updater signing not configured)');
           JS
@@ -119,17 +121,13 @@ jobs:
           retention-days: 14
 
   build-android:
-    name: Android ARM64 debug APK
+    name: Android ARM64 optimized release APK
     needs: validate
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    permissions:
-      contents: write
-    concurrency:
-      group: hermes-android-signing-identity
-      cancel-in-progress: false
+    timeout-minutes: 90
     env:
-      ANDROID_NDK_VERSION: 26.1.10909125
+      ANDROID_NDK_VERSION: 28.2.13676358
+      ANDROID_BUILD_TOOLS_VERSION: 37.0.0
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -156,72 +154,28 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
-          key: android-aarch64
-      - name: Reuse debug signing identity when cached
-        if: ${{ needs.validate.outputs.updater_signing != 'true' || github.event.repository.private }}
-        uses: actions/cache@v4
-        with:
-          path: ~/.android/debug.keystore
-          key: hermes-android-debug-keystore-v1
+          key: android-aarch64-release-ndk28-v1
       - run: npm ci
       - name: Generate Android project
         run: npx tauri android init --ci --skip-targets-install
-      - name: Restore Android signing identity for public signed releases
-        if: ${{ needs.validate.outputs.updater_signing == 'true' && github.event.repository.private == false }}
+      - name: Build, align, sign and inspect optimized release APK
+        run: npm run android:build
         env:
+          ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
           ANDROID_DEBUG_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
-        run: |
-          python3 - <<'PY'
-          import base64, os
-          from pathlib import Path
-          data = base64.b64decode(os.environ['ANDROID_DEBUG_KEYSTORE_BASE64'], validate=True)
-          if not data:
-              raise SystemExit('Android signing identity is empty.')
-          destination = Path.home() / '.android' / 'debug.keystore'
-          destination.parent.mkdir(parents=True, exist_ok=True)
-          destination.write_bytes(data)
-          destination.chmod(0o600)
-          PY
-          keytool -list -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey > /dev/null
-      - name: Restore durable Android signing identity
-        if: ${{ needs.validate.outputs.updater_signing == 'true' && github.event.repository.private }}
-        run: node scripts/android-signing.mjs restore
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      - name: Build Android APK
-        run: npx tauri android build --apk --debug --target aarch64 --ci -- --locked
       - name: Verify frontend source identity after native build
         run: node scripts/check-build-info.mjs
-      - name: Collect and verify ARM64 APKs
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import shutil
-          import zipfile
-          files = sorted(Path('src-tauri/gen/android/app/build/outputs/apk').rglob('*.apk'))
-          if not files:
-              raise SystemExit('No Android APK was built')
-          output = Path('release-assets')
-          output.mkdir()
-          for source in files:
-              with zipfile.ZipFile(source) as apk:
-                  names = apk.namelist()
-                  if 'AndroidManifest.xml' not in names or not any(name.startswith('lib/arm64-v8a/') and 'hermes' in name and name.endswith('.so') for name in names):
-                      raise SystemExit(f'Missing Android manifest or ARM64 app library: {source}')
-                  if apk.testzip() is not None:
-                      raise SystemExit(f'Corrupt APK: {source}')
-              shutil.copy2(source, output / f'hermes-cockpit-android-arm64-{source.name}')
-          PY
-          for apk in release-assets/*.apk; do
-            "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --verbose "$apk"
-          done
-      - name: Preserve Android signing identity privately
-        if: ${{ needs.validate.outputs.updater_signing == 'true' && github.event.repository.private }}
-        run: node scripts/android-signing.mjs save
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      - name: Preserve APK inspection report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostics-android-apk
+          path: reports/android-apk-release.json
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Sign and verify Android updater package
         run: node scripts/sign-updates.mjs release-assets
         env:

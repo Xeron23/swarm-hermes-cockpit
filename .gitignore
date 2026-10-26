@@ -14,5 +14,10 @@ src-tauri/.gradle/
 .env.local
 *.keystore
 *.jks
+src-tauri/gen/android/
+release-assets/
+reports/
+**/keystore.properties
+**/__pycache__/
 *.log
 .DS_Store

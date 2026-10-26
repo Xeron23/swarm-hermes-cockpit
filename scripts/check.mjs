@@ -63,4 +63,4 @@ assert.ok(pkg.devDependencies['@tauri-apps/cli'].startsWith('2.'));
 console.log('PASS: Tauri v2 config schema (base, Android, Windows)');
 console.log('PASS: local assets, JS syntax, native permissions, and version consistency');
 console.log('PASS: Windows test assembly definition and Common Controls v6 dependency');
-console.log('Native compilation is a separate check: npm run build / npm run android:build:debug');
+console.log('Native compilation is a separate check: npm run build / npm run android:build (persistent APK signing required)');
