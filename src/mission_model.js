@@ -1,35 +1,12 @@
-export const ACTIVE_STATUSES = new Set([
-  'running',
-  'queued',
-  'planning',
-  'paused',
-  'waiting_approval',
-  'waiting_input',
-  'waiting',
-  'active'
-]);
-
-export const TERMINAL_STATUSES = new Set([
-  'succeeded',
-  'completed',
-  'failed',
-  'cancelled'
-]);
-
-export function isActiveMission(mission) {
-  if (!mission || typeof mission !== 'object') return false;
-  const status = String(mission.status || '').toLowerCase().trim();
-  if (ACTIVE_STATUSES.has(status)) return true;
-  if (TERMINAL_STATUSES.has(status)) return false;
-  // If status is unknown, don't automatically treat as running if it looks terminal
-  return !status.includes('fail') && !status.includes('cancel') && !status.includes('done') && !status.includes('complete');
-}
-
-export function isTerminalMission(mission) {
-  if (!mission || typeof mission !== 'object') return false;
-  const status = String(mission.status || '').toLowerCase().trim();
-  return TERMINAL_STATUSES.has(status);
-}
+// Overview "aktif" means executing; queued/paused/unknown stay visible in waiting.
+export const ACTIVE_STATUSES = new Set(['running']);
+export const TERMINAL_STATUSES = new Set(['succeeded', 'completed', 'failed', 'cancelled', 'canceled']);
+const statusOf = mission => String(mission?.status || '').toLowerCase().trim();
+export const isActiveMission = mission => ACTIVE_STATUSES.has(statusOf(mission));
+export const isTerminalMission = mission => TERMINAL_STATUSES.has(statusOf(mission));
+const timestamp = mission => Date.parse(mission.updated_at || '') || 0;
+const newestFirst = (a, b) => timestamp(b) - timestamp(a) || a.id.localeCompare(b.id);
+const normalized = missions => Array.isArray(missions) ? missions.map(normalizeMission).filter(Boolean) : [];
 
 export function normalizeMission(record) {
   if (!record || typeof record !== 'object') return null;
@@ -62,33 +39,17 @@ export function normalizeMission(record) {
 }
 
 export function selectActiveMissions(missions) {
-  if (!Array.isArray(missions)) return [];
-  const normalized = missions.map(normalizeMission).filter(Boolean);
-  const active = normalized.filter(isActiveMission);
-  
-  return active.sort((a, b) => {
-    const aRunning = a.status === 'running' ? 1 : 0;
-    const bRunning = b.status === 'running' ? 1 : 0;
-    if (aRunning !== bRunning) return bRunning - aRunning;
-
-    const aTime = a.updated_at ? new Date(a.updated_at).getTime() : 0;
-    const bTime = b.updated_at ? new Date(b.updated_at).getTime() : 0;
-    if (aTime !== bTime) return bTime - aTime;
-
-    return a.id.localeCompare(b.id);
-  });
+  return normalized(missions).filter(isActiveMission).sort(newestFirst);
 }
 
+export function selectPrimaryMission(missions) {
+  return selectActiveMissions(missions)[0] || null;
+}
+export function selectMissionQueue(missions) {
+  return normalized(missions).filter(m => !isActiveMission(m) && !isTerminalMission(m)).sort(newestFirst);
+}
 export function selectMissionHistory(missions) {
-  if (!Array.isArray(missions)) return [];
-  const normalized = missions.map(normalizeMission).filter(Boolean);
-  const history = normalized.filter(m => !isActiveMission(m));
-  
-  return history.sort((a, b) => {
-    const aTime = a.updated_at ? new Date(a.updated_at).getTime() : 0;
-    const bTime = b.updated_at ? new Date(b.updated_at).getTime() : 0;
-    return bTime - aTime;
-  });
+  return normalized(missions).filter(isTerminalMission).sort(newestFirst);
 }
 
 export function selectMissionAssignments(detail, agentsById = {}) {

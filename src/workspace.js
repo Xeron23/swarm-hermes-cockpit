@@ -1,4 +1,5 @@
 import { items, sequence, compareSequence, ApiError } from './api_client.js';
+import { SEMANTIC_EVENT_TYPES } from './activity_model.js';
 import { formatApiError } from './diagnostics.js';
 import { selectActiveMissions, selectMissionHistory, normalizeMission } from './mission_model.js';
 
@@ -18,14 +19,18 @@ export function metricRows(node) {
 }
 
 export class Workspace {
-  constructor(api) {
+  constructor(api, { now = () => Date.now(), isVisible = () => globalThis.document?.visibilityState !== 'hidden' } = {}) {
     this.api = api;
+    this.now = now;
+    this.isVisible = isVisible;
+    this.lastSyncedAt = 0;
+    this.replyTimers = new Map();
     this.listeners = new Set();
     this.state = this.empty();
     this.epoch = 0;
   }
   empty() {
-    return { status: this.api?.accessToken ? 'connecting' : this.api?.authenticationRequired ? 'auth_required' : 'unpaired', connectionStage: null, workspaceId: null, error: '', updatedAt: null, nodes: [], agents: [], missions: [], activeMissions: [], missionHistory: [], missionDetailsById: {}, sessions: [], messages: {}, events: [], features: {}, approvals: [], questions: [], sectionErrors: {} };
+    return { status: this.api?.accessToken ? 'connecting' : this.api?.authenticationRequired ? 'auth_required' : 'unpaired', connectionStage: null, workspaceId: null, error: '', updatedAt: null, nodes: [], agents: [], missions: [], activeMissions: [], missionHistory: [], missionDetailsById: {}, sessions: [], messages: {}, pendingReplies: {}, activityEvents: [], events: [], features: {}, approvals: [], questions: [], sectionErrors: {} };
   }
   subscribe(listener) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   emit() { for (const listener of this.listeners) listener(this.state); }
@@ -34,7 +39,7 @@ export class Workspace {
   requireOnline() {
     if (!this.writable) throw new ApiError('Tunggu backend dan telemetry siap sebelum mengirim perintah.', { code: 'NOT_READY' });
   }
-  async snapshot(resetCursor = false) {
+  async snapshot(resetCursor = false, notify = true) {
     const epoch = this.epoch;
     const value = await this.api.getBootstrap();
     if (epoch !== this.epoch) return;
@@ -42,20 +47,24 @@ export class Workspace {
       throw new ApiError('Snapshot workspace tidak sesuai identitas perangkat atau kontrak API.', { code: 'INVALID_SNAPSHOT', endpoint: '/api/v1/bootstrap', method: 'GET' });
     }
     if (resetCursor && sequence(value.last_event_seq) === null) throw new ApiError('Cursor event server tidak valid.', { code: 'INVALID_SNAPSHOT', endpoint: '/api/v1/bootstrap', method: 'GET' });
+    const incomingIds = new Set(value.active_missions.map(mission => mission.id));
+    // Bootstrap contains active records only. Keep known records until the
+    // authoritative full list arrives, including when a delta emits mid-fetch.
+    const missions = [...value.active_missions, ...this.state.missions.filter(mission => !incomingIds.has(mission.id))];
     Object.assign(this.state, {
       workspaceId: value.workspace_id,
       nodes: value.nodes,
       agents: value.agents,
-      missions: value.active_missions,
-      activeMissions: selectActiveMissions(value.active_missions),
-      missionHistory: selectMissionHistory(value.active_missions),
+      missions,
+      activeMissions: selectActiveMissions(missions),
+      missionHistory: selectMissionHistory(missions),
       features: value.features || {},
       updatedAt: new Date().toISOString()
     });
     if (resetCursor) this.api.lastEventSeq = value.last_event_seq;
-    this.emit();
+    if (notify) this.emit();
   }
-  async sections() {
+  async sections(notify = true) {
     const epoch = this.epoch;
     const calls = { missions: () => this.api.getMissions(), sessions: () => this.api.getSessions(), approvals: () => this.api.getApprovals(), questions: () => this.api.getQuestions() };
     await Promise.all(Object.entries(calls).map(async ([name, call]) => {
@@ -77,7 +86,7 @@ export class Workspace {
         if (!this.api.accessToken || error.code === 'REFRESH_UNCERTAIN') this.state.status = this.disconnectedStatus;
       }
     }));
-    if (epoch === this.epoch) this.emit();
+    if (notify && epoch === this.epoch) this.emit();
   }
   async connect() {
     this.disconnect(false);
@@ -93,20 +102,25 @@ export class Workspace {
         stage('health');
         await this.api.getHealth();
         stage('bootstrap');
-        await this.snapshot(true);
-        if (epoch === this.epoch) await this.sections();
+        await this.snapshot(true, false);
+        if (epoch === this.epoch) {
+          await this.sections(false);
+          this.lastSyncedAt = this.now();
+          this.emit();
+        }
       },
       onStage: stage,
       onStatus: (status, error) => {
         if (epoch !== this.epoch) return;
         this.state.status = status;
+        if (status !== 'connected') this.interruptReplies();
         if (error) this.state.error = formatApiError(error);
         if (status === 'connected') { this.state.error = ''; this.state.connectionStage = 'ready'; }
         this.emit();
       },
       onEvent: event => { if (epoch === this.epoch) this.applyEvent(event); }
     });
-    this.pollTimer = setInterval(() => this.refresh().catch(() => {}), 15000);
+    this.pollTimer = setInterval(() => this.poll(), 15000);
     return attempt;
   }
   disconnect(clear = true) {
@@ -115,7 +129,28 @@ export class Workspace {
     clearInterval(this.pollTimer);
     clearTimeout(this.eventRefresh);
     this.refreshing = null;
+    this.eventRefresh = null;
+    this.eventRefreshStarted = null;
+    for (const timer of this.replyTimers.values()) clearTimeout(timer);
+    this.replyTimers.clear();
+    this.state.pendingReplies = {};
     if (clear) this.state = this.empty();
+  }
+  poll() {
+    if (!this.isVisible() || !this.api.accessToken || this.api.auth?.refresh_uncertain) return;
+    const live = this.state.status === 'connected' && Boolean(this.api.socket);
+    if (!live || this.now() - this.lastSyncedAt >= 120000) this.refresh().catch(() => {});
+  }
+  scheduleRefresh() {
+    const now = this.now();
+    this.eventRefreshStarted ??= now;
+    clearTimeout(this.eventRefresh);
+    const epoch = this.epoch;
+    this.eventRefresh = setTimeout(() => {
+      this.eventRefresh = null;
+      this.eventRefreshStarted = null;
+      if (epoch === this.epoch && this.isVisible()) this.refresh().catch(() => {});
+    }, Math.max(0, Math.min(1000, 3000 - (now - this.eventRefreshStarted))));
   }
   async refresh() {
     if (this.refreshing) return this.refreshing;
@@ -123,8 +158,15 @@ export class Workspace {
     const epoch = this.epoch;
     this.refreshing = (async () => {
       try {
-        await this.snapshot();
-        await this.sections();
+        await this.snapshot(false, false);
+        if (epoch !== this.epoch) return;
+        await this.sections(false);
+        if (epoch !== this.epoch) return;
+        await Promise.all(Object.keys(this.state.pendingReplies).map(id => this.loadMessages(id, false).catch(error => {
+          if (epoch === this.epoch) this.state.sectionErrors.messages = formatApiError(error);
+        })));
+        if (epoch !== this.epoch) return;
+        this.lastSyncedAt = this.now();
         if (epoch === this.epoch && this.api.socket && !this.api.auth?.refresh_uncertain) { this.state.status = 'connected'; this.state.error = ''; }
         this.emit();
       } catch (error) {
@@ -140,6 +182,7 @@ export class Workspace {
   }
   applyEvent(event) {
     this.state.events = [event, ...this.state.events].slice(0, 300);
+    if (SEMANTIC_EVENT_TYPES.has(event.event_type)) this.state.activityEvents = [event, ...this.state.activityEvents].slice(0, 100);
     const payload = event.payload || {};
     if (event.event_type === 'MESSAGE_DELTA' && payload.session_id && payload.message_id && typeof payload.delta === 'string') {
       const messages = this.state.messages[payload.session_id] ||= [];
@@ -149,22 +192,25 @@ export class Workspace {
         messages.push(message);
       }
       message.content += payload.delta;
+      this.acceptReply(payload.session_id, message);
     }
     if (event.event_type === 'MESSAGE_FINAL') {
       const message = payload.message || payload;
       const id = message.message_id || message.id;
       const sessionId = message.session_id || Object.entries(this.state.messages).find(([, list]) => id && list.some(m => m.id === id))?.[0];
-      if (sessionId) this.loadMessages(sessionId).catch(error => {
-        this.state.sectionErrors.messages = error.message;
-        this.emit();
-      });
+      if (sessionId) {
+        this.acceptReply(sessionId, { ...message, sender_kind: message.sender_kind || (String(event.sender || '').startsWith('agent:') ? 'agent' : ''), sender_id: message.sender_id || senderId(event.sender), id });
+        const epoch = this.epoch;
+        this.loadMessages(sessionId).catch(error => {
+          if (epoch !== this.epoch) return;
+          this.state.sectionErrors.messages = error.message;
+          this.emit();
+        });
+      }
     }
     // Full backend records are authoritative; do not guess partial payload
     // schemas or mark a power action complete because its request was accepted.
-    if (event.event_type !== 'MESSAGE_DELTA' && event.event_type !== 'TOOL_LOG_CHUNK') {
-      clearTimeout(this.eventRefresh);
-      this.eventRefresh = setTimeout(() => this.refresh().catch(() => {}), 250);
-    }
+    if (/^(NODE|AGENT|MISSION|TASK|APPROVAL|QUESTION|ARTIFACT)_/.test(event.event_type)) this.scheduleRefresh();
     this.emit();
   }
   async session(agentId) {
@@ -173,43 +219,86 @@ export class Workspace {
     if (!agent) throw new ApiError('Agen tidak ditemukan.', { code: 'UNKNOWN_AGENT' });
     let id = agent.active_direct_session_id;
     if (!id) {
-      const value = await this.api.createSession(agentId, `Direct chat: ${agent.name}`);
-      const record = value?.session || value;
-      if (!record?.id) throw new ApiError('Respons session tidak lengkap.', { code: 'INVALID_RESPONSE' });
-      id = record.id;
+      const created = await this.api.createSession(agentId);
+      id = created?.session?.id || created?.id;
+      if (!id) throw new ApiError('Sesi agen tidak berhasil dibuat.', { code: 'INVALID_RESPONSE' });
       agent.active_direct_session_id = id;
+      this.state.sessions = [created.session || created, ...this.state.sessions.filter(s => s.id !== id)];
+      this.emit();
     }
     await this.loadMessages(id);
     return id;
   }
-  async loadMessages(id) {
+  async loadMessages(id, notify = true) {
     const epoch = this.epoch;
     const value = await this.api.getMessages(id);
     if (epoch !== this.epoch) return;
-    // A delta received while fetching must not be lost to an older HTTP list.
     const incoming = items(value);
-    const merged = new Map(incoming.map(m => [m.id, m]));
-    for (const message of this.state.messages[id] || []) {
-      const fetched = merged.get(message.id);
-      if (message.status === 'streaming' && (!fetched || fetched.status === 'streaming' && message.content.length > fetched.content.length)) merged.set(message.id, message);
-    }
-    this.state.messages[id] = [...merged.values()].sort((a, b) => {
+    const existing = this.state.messages[id] || [];
+    const stream = existing.find(m => m.status === 'streaming');
+    if (stream && !incoming.some(m => m.id === stream.id)) incoming.push(stream);
+    this.state.messages[id] = incoming.sort((a, b) => {
       const x = sequence(a.seq_no), y = sequence(b.seq_no);
       return x !== null && y !== null ? compareSequence(x, y) : String(a.created_at || '').localeCompare(String(b.created_at || ''));
     });
+    for (const message of this.state.messages[id]) this.acceptReply(id, message);
     delete this.state.sectionErrors.messages;
-    this.emit();
+    if (notify) this.emit();
   }
-  async send(id, content, target) {
-    this.requireOnline();
-    const value = await this.api.sendMessage(id, content, target);
-    // The contract returns a Message, not an invented task/agent reply.
-    const message = value?.message || value;
-    if (message?.id && message.session_id === id) {
-      const list = this.state.messages[id] ||= [];
-      if (!list.some(m => m.id === message.id)) list.push(message);
-      this.emit();
+  acceptReply(id, message) {
+    const pending = this.state.pendingReplies[id];
+    if (!pending || message.sender_kind !== 'agent' || !message.id || pending.knownIds.has(message.id)) return;
+    if (pending.agentId && senderId(message.sender_id) !== senderId(pending.agentId)) return;
+    // A late history fetch must not mistake an older agent message for this reply.
+    if (message.created_at && pending.lastAgentAt && Date.parse(message.created_at) <= pending.lastAgentAt) return;
+    clearTimeout(this.replyTimers.get(id));
+    this.replyTimers.delete(id);
+    delete this.state.pendingReplies[id];
+  }
+  interruptReplies() {
+    for (const [id, pending] of Object.entries(this.state.pendingReplies)) {
+      clearTimeout(this.replyTimers.get(id));
+      if (pending.phase === 'waiting') pending.phase = 'interrupted';
     }
-    await this.loadMessages(id);
+    this.replyTimers.clear();
+  }
+  async send(id, content, target, agentId = null) {
+    this.requireOnline();
+    const epoch = this.epoch;
+    if (this.state.pendingReplies[id]?.phase === 'sending') throw new ApiError('Pesan masih dikirim.', { code: 'SEND_PENDING' });
+    clearTimeout(this.replyTimers.get(id));
+    const pending = { phase: 'sending', agentId, lastAgentAt: Math.max(0, ...(this.state.messages[id] || []).filter(m => m.sender_kind === 'agent').map(m => Date.parse(m.created_at) || 0)), knownIds: new Set((this.state.messages[id] || []).map(m => m.id)) };
+    this.state.pendingReplies[id] = pending;
+    try {
+      const value = await this.api.sendMessage(id, content, target);
+      if (epoch !== this.epoch) return;
+      const message = value?.message || value;
+      if (message?.id && message.session_id === id) {
+        const list = this.state.messages[id] ||= [];
+        if (!list.some(m => m.id === message.id)) list.push(message);
+      }
+      // A stream can arrive before POST settles. Never resurrect its typing state.
+      if (this.state.pendingReplies[id] === pending) {
+        pending.phase = this.state.status === 'connected' ? 'waiting' : 'interrupted';
+        this.replyTimers.set(id, setTimeout(() => {
+          this.replyTimers.delete(id);
+          if (epoch === this.epoch && this.state.pendingReplies[id] === pending) {
+            pending.phase = 'delayed';
+            this.emit();
+          }
+        }, 90000));
+      }
+      this.emit();
+    } catch (error) {
+      if (epoch === this.epoch && this.state.pendingReplies[id] === pending) {
+        delete this.state.pendingReplies[id];
+        this.emit();
+      }
+      throw error; // Mutations are never replayed after a transport failure.
+    }
+    try { await this.loadMessages(id); } catch (error) {
+      // POST was accepted: a failed history GET must not encourage resending it.
+      if (epoch === this.epoch) { this.state.sectionErrors.messages = formatApiError(error); this.emit(); }
+    }
   }
 }

@@ -6,15 +6,17 @@ import {
   normalizeMission,
   selectActiveMissions,
   selectMissionHistory,
+  selectMissionQueue,
+  selectPrimaryMission,
   selectMissionAssignments,
   selectExecutingAgents
 } from '../src/mission_model.js';
 
 test('mission status categorization correctly differentiates active from terminal', () => {
   assert.equal(isActiveMission({ status: 'running' }), true);
-  assert.equal(isActiveMission({ status: 'queued' }), true);
-  assert.equal(isActiveMission({ status: 'paused' }), true);
-  assert.equal(isActiveMission({ status: 'planning' }), true);
+  assert.equal(isActiveMission({ status: 'queued' }), false);
+  assert.equal(isActiveMission({ status: 'paused' }), false);
+  assert.equal(isActiveMission({ status: 'planning' }), false);
 
   assert.equal(isActiveMission({ status: 'completed' }), false);
   assert.equal(isActiveMission({ status: 'succeeded' }), false);
@@ -46,11 +48,12 @@ test('selectActiveMissions and selectMissionHistory separate active from history
   const active = selectActiveMissions(missions);
   const history = selectMissionHistory(missions);
 
-  assert.equal(active.length, 3);
+  assert.equal(active.length, 2);
   // Running missions come first, sorted by updated_at desc
   assert.equal(active[0].id, 'm4'); // running, 12:00
   assert.equal(active[1].id, 'm2'); // running, 09:00
-  assert.equal(active[2].id, 'm3'); // paused, 11:00
+  assert.deepEqual(selectMissionQueue(missions).map(m => m.id), ['m3']);
+  assert.equal(selectPrimaryMission(missions).id, 'm4');
 
   assert.equal(history.length, 2);
   assert.equal(history[0].id, 'm1'); // completed, 10:00
@@ -83,4 +86,12 @@ test('selectMissionAssignments and selectExecutingAgents distinguish executing f
   assert.equal(executing[0].agentId, 'agent-1');
   assert.equal(executing[0].agentName, 'Lead Architect');
   assert.equal(executing[0].taskCount, 2);
+});
+
+test('unknown statuses remain waiting and invalid timestamps have deterministic ordering', () => {
+  const missions = [{ id: 'b', status: 'running', updated_at: 'invalid' }, { id: 'a', status: 'running' }, { id: 'q', status: 'queued' }, { id: 'u', status: 'unrecognized' }, { id: 'c', status: 'canceled' }];
+  assert.deepEqual(selectActiveMissions(missions).map(m => m.id), ['a', 'b']);
+  assert.deepEqual(selectMissionQueue(missions).map(m => m.id), ['q', 'u']);
+  assert.deepEqual(selectMissionHistory(missions).map(m => m.id), ['c']);
+  assert.equal(selectPrimaryMission([]), null);
 });

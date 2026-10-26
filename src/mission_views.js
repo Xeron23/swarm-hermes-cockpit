@@ -31,7 +31,7 @@ export function renderMissionCard(mission, agentsById = {}) {
   const allowedActions = mission.allowed_actions || [];
 
   return `
-    <article class="mission-card" data-mission-id="${esc(mission.id)}">
+    <article class="mission-card" data-key="mission:${esc(mission.id)}" data-mission-id="${esc(mission.id)}">
       <div class="mission-head">
         <div>
           <span class="mission-id">ID: ${esc(mission.id)}</span>
@@ -78,13 +78,13 @@ export function renderMissionCard(mission, agentsById = {}) {
         <div class="mission-actions">
           <button type="button" class="secondary-button" data-action="mission-detail" data-mission-id="${esc(mission.id)}">Detail</button>
           ${allowedActions.includes('pause') && mission.status === 'running' ? `
-            <button type="button" class="text-button" data-action="mission-pause" data-mission-id="${esc(mission.id)}">Pause</button>
+            <button type="button" class="text-button" data-action="mission-action" data-command="pause" data-id="${esc(mission.id)}">Pause</button>
           ` : ''}
           ${allowedActions.includes('resume') && mission.status === 'paused' ? `
-            <button type="button" class="primary-button" data-action="mission-resume" data-mission-id="${esc(mission.id)}">Resume</button>
+            <button type="button" class="primary-button" data-action="mission-action" data-command="resume" data-id="${esc(mission.id)}">Resume</button>
           ` : ''}
           ${allowedActions.includes('cancel') && !['succeeded', 'completed', 'failed', 'cancelled'].includes(mission.status) ? `
-            <button type="button" class="text-button danger-button" data-action="mission-cancel" data-mission-id="${esc(mission.id)}">Batal</button>
+            <button type="button" class="text-button danger-button" data-action="mission-cancel" data-id="${esc(mission.id)}">Batal</button>
           ` : ''}
         </div>
       </div>
@@ -98,8 +98,8 @@ export function renderMissionDetailDialog(mission, agentsById = {}) {
   const milestones = mission.milestones || [];
 
   return `
-    <div class="sheet-overlay" data-action="sheet-dismiss" role="dialog" aria-modal="true" aria-labelledby="mission-dialog-title">
-      <div class="sheet mission-detail-sheet" onclick="event.stopPropagation()">
+    <div class="overlay sheet-overlay" id="mission-detail-backdrop" data-mission-backdrop>
+      <section class="sheet mission-detail-sheet" role="dialog" aria-modal="true" aria-labelledby="mission-dialog-title">
         <div class="sheet-header">
           <div>
             <span class="mission-id">ID: ${esc(mission.id)}</span>
@@ -121,7 +121,7 @@ export function renderMissionDetailDialog(mission, agentsById = {}) {
             </div>
             <div class="detail-item">
               <span class="muted">Progress</span>
-              <strong>${mission.progress_percent !== null ? `${mission.progress_percent}%` : 'Belum dilaporkan'}</strong>
+              <strong>${Number.isFinite(mission.progress_percent) ? `${mission.progress_percent}%` : 'Belum dilaporkan'}</strong>
             </div>
             ${mission.updated_at ? `
               <div class="detail-item">
@@ -176,7 +176,7 @@ export function renderMissionDetailDialog(mission, agentsById = {}) {
         <div class="sheet-footer">
           <button type="button" class="secondary-button" data-action="sheet-dismiss">Tutup</button>
         </div>
-      </div>
+      </section>
     </div>
   `;
 }

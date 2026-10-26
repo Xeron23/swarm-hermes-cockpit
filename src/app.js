@@ -7,12 +7,20 @@ import { BUILD_INFO } from './build_info.js';
 import { normalizePairingInput } from './pairing.js';
 import { AppUpdater } from './app_updater.js';
 import { updateBody, updateFooter } from './update_views.js';
+import { patchMarkup } from './dom_patch.js';
+import { selectOverviewActivities } from './activity_model.js';
 import { themeManager } from './theme_manager.js';
 
 const workspace = new Workspace(api);
 const updater = new AppUpdater();
 const ui = { page: 'overview', agentId: null, sessionId: null, agentFilter: 'all', eventFilter: 'all', target: 'auto', draft: '', error: '', pending: new Set(), logTraceId: null, connectionDiagnostic: '', themePanelOpen: false, missionDetailId: null };
 let logTimer;
+let missionReturnFocus;
+function dismissMissionDetail() {
+  ui.missionDetailId = null;
+  paint();
+  if (missionReturnFocus?.isConnected) missionReturnFocus.focus({ preventScroll: true });
+}
 let themeReturnFocusSelector = '.topbar [data-action="theme-panel"]';
 function dismissThemePanel() {
   ui.themePanelOpen = false;
@@ -32,27 +40,29 @@ function paint() {
   const focus = document.activeElement;
   const id = focus?.id;
   const selection = focus?.selectionStart;
+  const selectionEnd = focus?.selectionEnd;
   const chat = $('#chat-messages');
   const follow = !chat || chat.scrollHeight - chat.scrollTop - chat.clientHeight < 80;
   const scroll = chat?.scrollTop;
   const themeScroll = document.querySelector('.theme-panel-body')?.scrollTop;
   document.body.classList.toggle('chat-mode', ui.page === 'chat');
-  $('#app').innerHTML = render(workspace.state, ui, api, workspace.writable);
+  const changed = patchMarkup($('#app'), render(workspace.state, ui, api, workspace.writable));
   document.body.classList.toggle('theme-open', ui.themePanelOpen);
   const themeOverlay = document.getElementById('theme-panel-backdrop');
+  const missionOverlay = document.getElementById('mission-detail-backdrop');
   for (const child of document.querySelector('.shell')?.children || []) {
-    child.inert = ui.themePanelOpen && child !== themeOverlay;
+    child.inert = (ui.themePanelOpen || Boolean(ui.missionDetailId)) && child !== (ui.themePanelOpen ? themeOverlay : missionOverlay);
   }
   const themeBody = document.querySelector('.theme-panel-body');
   if (themeBody && themeScroll !== undefined) themeBody.scrollTop = themeScroll;
   const replacement = id ? document.getElementById(id) : null;
-  if (replacement && !replacement.disabled) {
+  if (replacement && replacement !== focus && !replacement.disabled) {
     replacement.focus({ preventScroll: true });
-    if (typeof selection === 'number' && replacement.setSelectionRange) replacement.setSelectionRange(selection, selection);
+    if (typeof selection === 'number' && replacement.setSelectionRange) replacement.setSelectionRange(selection, selectionEnd ?? selection);
   }
   const nextChat = $('#chat-messages');
-  if (nextChat) nextChat.scrollTop = follow ? nextChat.scrollHeight : scroll || 0;
-  window.HermesUI.paint({ page: ui.page, agent: ui.agentId, messageCount: workspace.state.messages[ui.sessionId]?.length || 0, feedId: workspace.state.events[0]?.event_id || '' });
+  if (changed && nextChat) nextChat.scrollTop = follow ? nextChat.scrollHeight : scroll || 0;
+  if (changed) window.HermesUI.paint({ page: ui.page, agent: ui.agentId, messageCount: workspace.state.messages[ui.sessionId]?.length || 0, feedId: ui.page === 'overview' ? selectOverviewActivities(workspace.state)[0]?.id || '' : workspace.state.events[0]?.event_id || '' });
 }
 function close() { ui.logTraceId = null; clearTimeout(logTimer); window.HermesUI.closeSheet(); }
 function sheet(title, description, body, footer = '', wide = false) {
@@ -131,8 +141,9 @@ async function loadLogs(id) {
   const status = $('#log-status');
   if (status) status.textContent = logs.truncated ? 'Log dipotong oleh backend.' : 'Log dari backend.';
 }
+let workspacePaint;
 workspace.subscribe(() => {
-  paint();
+  if (!workspacePaint) workspacePaint = requestAnimationFrame(() => { workspacePaint = null; paint(); });
   if ($('#connection-stage')) $('#connection-stage').textContent = stageText(workspace.state.connectionStage);
   if ($('#connection-diagnostics') && workspace.state.error) {
     $('#connection-diagnostics').textContent = [...new Set([ui.connectionDiagnostic, workspace.state.error].filter(Boolean))].join('\n');
@@ -144,6 +155,8 @@ workspace.subscribe(() => {
   }
 });
 
+document.addEventListener('compositionstart', event => { if (event.target.id === 'chat-input') event.target.dataset.composing = 'true'; });
+document.addEventListener('compositionend', event => { if (event.target.id === 'chat-input') { delete event.target.dataset.composing; ui.draft = event.target.value; } });
 document.addEventListener('input', event => {
   if (event.target.id === 'pair-code') normalizePairingInput(event.target);
   if (event.target.id === 'chat-input') ui.draft = event.target.value;
@@ -153,6 +166,7 @@ document.addEventListener('change', event => {
   if (event.target.id === 'chat-route') ui.target = event.target.value;
 });
 document.addEventListener('click', event => {
+  if (event.target.matches('[data-mission-backdrop]')) { dismissMissionDetail(); return; }
   if (event.target.matches('[data-theme-backdrop]')) { dismissThemePanel(); return; }
   if (event.target.id === 'overlay-backdrop') { close(); return; }
   const button = event.target.closest('[data-action]');
@@ -160,7 +174,7 @@ document.addEventListener('click', event => {
   const { action, id, command } = button.dataset;
   if (action === 'close') { close(); return; }
   if (action === 'dismiss-error') { ui.error = ''; paint(); return; }
-  if (action === 'navigate') { close(); ui.page = button.dataset.page; paint(); window.scrollTo(0, 0); return; }
+  if (action === 'navigate') { close(); ui.page = button.dataset.page; paint(); $('#page-content')?.scrollTo(0, 0); return; }
   if (action === 'connection') { connection(); return; }
   if (action === 'app-updates') { appUpdates(); return; }
   if (action === 'inbox') { inbox(); return; }
@@ -177,11 +191,13 @@ document.addEventListener('click', event => {
   if (action === 'theme-dismiss') { dismissThemePanel(); return; }
   if (action === 'theme-select') { const themeId = button.dataset.themeId; if (themeId) themeManager.setTheme(themeId); paint(); return; }
   if (action === 'theme-reset') { themeManager.setTheme('ocean-mist'); paint(); return; }
-  if (action === 'sheet-dismiss') { if (ui.missionDetailId) { ui.missionDetailId = null; paint(); return; } }
+  if (action === 'sheet-dismiss' && ui.missionDetailId) { dismissMissionDetail(); return; }
   if (action === 'mission-detail') {
     const missionId = button.dataset.missionId || id;
+    missionReturnFocus = button;
     ui.missionDetailId = missionId;
     paint();
+    document.querySelector('.mission-detail-sheet button')?.focus({ preventScroll: true });
     if (api.getMission) {
       api.getMission(missionId).then(detail => {
         if (detail && ui.missionDetailId === missionId) {
@@ -320,8 +336,14 @@ document.addEventListener('submit', event => {
         if (form.id === 'chat-form') {
           const text = String(data.get('content') || '').trim();
           if (!text) return;
-          await workspace.send(ui.sessionId, text, String(data.get('target')));
-          ui.draft = '';
+          const sessionId = ui.sessionId;
+          const draft = ui.draft;
+          await workspace.send(sessionId, text, String(data.get('target')), ui.agentId);
+          if (ui.sessionId === sessionId && ui.draft === draft) {
+            ui.draft = '';
+            const input = $('#chat-input');
+            if (input) input.value = '';
+          }
         }
         if (form.id === 'mission-form') {
           await api.createMission(String(data.get('title')).trim(), String(data.get('prompt')).trim(), String(data.get('target')));
@@ -354,6 +376,7 @@ document.addEventListener('keydown', event => {
     dismissThemePanel();
     return;
   }
+  if (event.key === 'Escape' && ui.missionDetailId) { event.preventDefault(); dismissMissionDetail(); return; }
   if (event.key === 'Escape') close();
   const dialog = document.querySelector('[role="dialog"]');
   if (event.key === 'Tab' && dialog) {
@@ -367,7 +390,12 @@ window.addEventListener('online', () => { if (api.accessToken) workspace.connect
 window.addEventListener('online', () => updater.check());
 window.addEventListener('beforeunload', () => updater.dispose());
 window.addEventListener('offline', () => { workspace.state.status = 'offline'; workspace.state.error = 'Perangkat tidak memiliki koneksi jaringan.'; workspace.emit(); });
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && api.accessToken) workspace.connect(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && api.accessToken) {
+    if (workspace.state.status === 'connected' && api.socket) workspace.refresh().catch(() => {});
+    else workspace.connect();
+  }
+});
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && (!updater.state.checkedAt || Date.now() - new Date(updater.state.checkedAt).getTime() > updater.interval)) updater.check();
 });
