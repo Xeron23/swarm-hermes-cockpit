@@ -27,13 +27,15 @@ test('live telemetry throttles snapshots, offline fallback and visibility remain
   now = 120000; w.poll(); assert.equal(calls, 1);
   w.state.status = 'offline'; w.poll(); assert.equal(calls, 2);
   visible = false; w.poll(); assert.equal(calls, 2);
-  visible = true; w.api.auth.refresh_uncertain = true; w.poll(); assert.equal(calls, 2);
+  visible = true; w.api.auth.refresh_uncertain = true; w.poll(); assert.equal(calls, 3);
+  w.telemetryStarted = true; w.state.telemetryConnected = false; w.poll(); assert.equal(calls, 3);
 });
 
-test('one refresh emits one complete snapshot and retains mission history', async () => {
+test('one refresh emits loading then one complete snapshot and retains mission history', async () => {
   const w = fixture({ api: { getMissions: async () => ({ items: [{ id: 'done', status: 'completed' }] }) } });
-  const frames = []; w.subscribe(s => frames.push(s.missions.map(m => m.id)));
-  await Promise.all([w.refresh(), w.refresh()]); assert.deepEqual(frames, [['done']]);
+  const frames = []; w.subscribe(s => frames.push({ busy: s.syncing, ids: s.missions.map(m => m.id) }));
+  await Promise.all([w.refresh(), w.refresh()]);
+  assert.deepEqual(frames, [{ busy: true, ids: [] }, { busy: false, ids: ['done'] }]);
 });
 
 test('raw events do not change Overview markup and semantic activities survive the raw buffer', () => {

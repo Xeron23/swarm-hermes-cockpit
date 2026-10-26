@@ -34,15 +34,15 @@ Bootstrap harus cocok dengan `workspace_id` dan `device_id` hasil pairing, beris
 
 ## Telemetry
 
-Koneksi memakai `/ws/telemetry?ticket=...&after_seq=...` dan subprotokol `hermes.telemetry.v1`. Tiket baru diminta untuk setiap koneksi. Sebelum reconnect, client mengambil snapshot dan cursor baru, kemudian server mengejar event setelah snapshot tersebut. Client mengirim `ping` setiap 15 detik dan mengabaikan `pong` sebagai keepalive.
+Koneksi memakai `/ws/telemetry?ticket=...&after_seq=...` dan subprotokol `hermes.telemetry.v1`. Tiket baru diminta untuk setiap koneksi. Sebelum reconnect, client mengambil snapshot dan cursor baru, kemudian server mengejar event setelah snapshot tersebut. Client mengirim `ping` setiap 15 detik dan memakai `pong` sebagai bukti keepalive; socket tanpa pong lebih dari 45 detik dibuka ulang.
 
 Event harus berisi `schema_version: "1.0"`, workspace yang sesuai, event ID, tipe, dan sequence string desimal. Sequence dibandingkan sebagai string desimal agar presisi tetap utuh melampaui batas Number dan tidak memerlukan BigInt pada WebView lama. Event duplikat, cursor lama, serta pesan socket yang sudah diganti diabaikan.
 
-`MESSAGE_DELTA` merangkai pesan berdasarkan session/message ID; `MESSAGE_FINAL` memuat kembali daftar pesan authoritative. Perubahan agen, node, misi, task, approval, pertanyaan, dan artifact memicu sinkronisasi backend. Log aktif dimuat ulang saat event `TOOL_LOG_CHUNK` untuk trace yang sama diterima. Snapshot juga diperiksa berkala setiap 15 detik. Swarm menyimpan maksimal 300 event yang diterima selama sesi; riwayat event sebelum sesi tidak direkayasa oleh client.
+`MESSAGE_DELTA` merangkai pesan berdasarkan session/message ID; `MESSAGE_FINAL` memuat kembali daftar pesan authoritative. Perubahan agen, node, misi, task, approval, pertanyaan, dan artifact memicu sinkronisasi backend. Log aktif dimuat ulang saat event `TOOL_LOG_CHUNK` untuk trace yang sama diterima. Tick polling 15 detik hanya melakukan fallback ketika diperlukan; socket live menunda snapshot sampai 120 detik (60 detik untuk verifikasi sesi uncertain). Swarm menyimpan maksimal 300 event yang diterima selama sesi; riwayat event sebelum sesi tidak direkayasa oleh client.
 
 ## Token dan mutasi
 
-Refresh menggunakan satu promise bersama untuk semua respons 401 bersamaan. Refresh token baru disimpan bersama access token baru. Respons jaringan yang hilang ketika refresh tidak diulang otomatis, karena backend mungkin sudah merotasi token. Ketidakpastian tersebut disimpan agar restart aplikasi tidak memakai kembali refresh token lama.
+Refresh menggunakan satu promise bersama untuk semua respons 401 bersamaan. Refresh token baru disimpan bersama access token baru. Respons jaringan yang hilang ketika refresh tidak diulang otomatis, karena backend mungkin sudah merotasi token. Intent ketidakpastian disimpan sebelum request agar restart di tengah rotasi juga tidak memakai kembali refresh token lama. Recovery tanpa rotasi memerlukan capability backend yang dijelaskan di [resiliensi FE](FE_CONNECTION_RESILIENCE.md); health saja tidak membuktikan token masih current.
 
 POST pesan, misi, diagnostik, atau daya tidak diulang setelah timeout/kegagalan transport. Refresh lalu retry satu kali setelah 401 diperbolehkan; 403 tidak memicu refresh atau fallback ke alamat lain. Penghapusan sesi mencegah refresh yang masih berjalan menghidupkan kembali kredensial.
 

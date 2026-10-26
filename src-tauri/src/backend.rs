@@ -38,8 +38,8 @@ impl BackendHttp {
             client: Client::builder()
                 .no_proxy()
                 .redirect(Policy::none())
-                .connect_timeout(Duration::from_secs(5))
-                .timeout(Duration::from_secs(12))
+                .connect_timeout(Duration::from_secs(10))
+                .timeout(Duration::from_secs(20))
                 .build()?,
             origin: Url::parse(SERVER).expect("static backend origin"),
         })

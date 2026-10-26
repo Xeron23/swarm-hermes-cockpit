@@ -55,7 +55,7 @@ Untuk tampilan web development: `npm run web:dev`. Browser memakai fetch/WebSock
 4. Lihat Nodes untuk status dan metrik; buka Agents untuk session chat; buat misi dari Overview. Target `auto` diserahkan ke scheduler backend.
 5. Event asli muncul di Swarm selama sesi koneksi. Event dengan task ID dapat membuka traces dan log backend. Persetujuan dan pertanyaan ada pada tombol lonceng.
 
-Refresh token berotasi secara bersama untuk permintaan bersamaan. Jika hasil POST refresh hilang karena koneksi putus, token lama tidak dikirim ulang otomatis; pairing ulang diperlukan. Kredensial disimpan dalam penyimpanan lokal WebView per endpoint. Penyimpanan ini belum memakai Windows Credential Manager atau Android Keystore; gunakan perangkat tepercaya. Cache dan token demo versi lama tidak dimigrasikan otomatis.
+Refresh token berotasi secara bersama untuk permintaan bersamaan. Jika hasil POST refresh hilang karena koneksi putus, token lama tidak dikirim ulang otomatis; client memverifikasi access token atau memakai kontrak recovery backend non-rotating bila tersedia. Lihat [auto-connect dan pemulihan sesi](docs/FE_CONNECTION_RESILIENCE.md). Kredensial disimpan dalam penyimpanan lokal WebView per endpoint. Penyimpanan ini belum memakai Windows Credential Manager atau Android Keystore; gunakan perangkat tepercaya. Cache dan token demo versi lama tidak dimigrasikan otomatis.
 
 Kode pairing yang ditempel dibersihkan dari spasi dan karakter format tersembunyi, lalu huruf kecil diubah ke huruf besar. Kolom dan API client memakai aturan yang sama: 26 karakter A–Z/2–7. Kode yang salah panjang atau mengandung karakter lain ditandai sebelum dikirim; input panjang tidak dipotong diam-diam.
 

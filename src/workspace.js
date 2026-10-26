@@ -2,6 +2,7 @@ import { items, sequence, compareSequence, ApiError } from './api_client.js';
 import { SEMANTIC_EVENT_TYPES } from './activity_model.js';
 import { formatApiError } from './diagnostics.js';
 import { selectActiveMissions, selectMissionHistory, normalizeMission } from './mission_model.js';
+import { recoveryNeeded } from './connection_policy.js';
 
 export const senderId = value => String(value || '').replace(/^(agent|node|user):/, '');
 export function metricRows(node) {
@@ -30,7 +31,7 @@ export class Workspace {
     this.epoch = 0;
   }
   empty() {
-    return { status: this.api?.accessToken ? 'connecting' : this.api?.authenticationRequired ? 'auth_required' : 'unpaired', connectionStage: null, workspaceId: null, error: '', updatedAt: null, nodes: [], agents: [], missions: [], activeMissions: [], missionHistory: [], missionDetailsById: {}, sessions: [], messages: {}, pendingReplies: {}, activityEvents: [], events: [], features: {}, approvals: [], questions: [], sectionErrors: {} };
+    return { status: this.api?.accessToken ? 'connecting' : this.api?.authenticationRequired ? 'auth_required' : 'unpaired', connectionStage: null, workspaceId: null, error: '', syncing: false, syncVersion: 0, telemetryConnected: false, retry: null, sessionWarning: '', updatedAt: null, nodes: [], agents: [], missions: [], activeMissions: [], missionHistory: [], missionDetailsById: {}, sessions: [], messages: {}, pendingReplies: {}, activityEvents: [], events: [], features: {}, approvals: [], questions: [], sectionErrors: {} };
   }
   subscribe(listener) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   emit() { for (const listener of this.listeners) listener(this.state); }
@@ -89,10 +90,13 @@ export class Workspace {
     if (notify && epoch === this.epoch) this.emit();
   }
   async connect() {
+    if (this.connecting && this.api.retryTelemetry) return this.connecting;
+    if (this.telemetryStarted && this.api.retryTelemetry) return this.api.retryTelemetry();
     this.disconnect(false);
     if (this.state.workspaceId && this.state.workspaceId !== this.api.workspaceId) this.state = this.empty();
     if (!this.api.accessToken) { this.state.status = this.disconnectedStatus; this.emit(); return; }
     const epoch = this.epoch;
+    this.telemetryStarted = true;
     this.state.status = 'connecting';
     this.state.error = '';
     this.emit();
@@ -100,32 +104,50 @@ export class Workspace {
     const attempt = this.api.startTelemetry({
       beforeConnect: async () => {
         stage('health');
-        await this.api.getHealth();
+        const health = await this.api.getHealth();
+        if (epoch !== this.epoch) return;
+        if (health?.status !== 'ok') throw new ApiError('Backend belum siap; koneksi akan dicoba kembali.', { code: 'BACKEND_NOT_READY', status: 503, retryable: true, endpoint: '/health/ready', method: 'GET' });
+        if (this.api.auth?.refresh_uncertain) {
+          stage('session');
+          await this.api.recoverSession(health);
+        }
+        if (epoch !== this.epoch) return;
         stage('bootstrap');
         await this.snapshot(true, false);
         if (epoch === this.epoch) {
           await this.sections(false);
           this.lastSyncedAt = this.now();
+          this.state.syncVersion++;
+          this.state.sessionWarning = this.api.auth?.refresh_uncertain ? 'Access token masih dapat dipakai untuk membaca. Refresh token perlu verifikasi backend; aksi tugas sementara dinonaktifkan.' : '';
           this.emit();
         }
       },
       onStage: stage,
+      onRetry: retry => { if (epoch === this.epoch) { this.state.retry = retry; this.emit(); } },
       onStatus: (status, error) => {
         if (epoch !== this.epoch) return;
         this.state.status = status;
+        this.state.telemetryConnected = status === 'connected';
+        if (status !== 'connected' && this.state.connectionStage === 'ready') this.state.connectionStage = 'telemetry';
         if (status !== 'connected') this.interruptReplies();
         if (error) this.state.error = formatApiError(error);
-        if (status === 'connected') { this.state.error = ''; this.state.connectionStage = 'ready'; }
+        if (status === 'connected') { this.state.error = ''; this.state.connectionStage = 'ready'; this.state.retry = null; }
         this.emit();
       },
       onEvent: event => { if (epoch === this.epoch) this.applyEvent(event); }
     });
     this.pollTimer = setInterval(() => this.poll(), 15000);
-    return attempt;
+    this.connecting = Promise.resolve(attempt).finally(() => { if (epoch === this.epoch) this.connecting = null; });
+    return this.connecting;
   }
   disconnect(clear = true) {
     this.epoch++;
     this.api.stopTelemetry();
+    this.telemetryStarted = false;
+    this.connecting = null;
+    this.state.telemetryConnected = false;
+    this.state.syncing = false;
+    this.state.retry = null;
     clearInterval(this.pollTimer);
     clearTimeout(this.eventRefresh);
     this.refreshing = null;
@@ -136,10 +158,28 @@ export class Workspace {
     this.state.pendingReplies = {};
     if (clear) this.state = this.empty();
   }
+  suspend() {
+    this.disconnect(false);
+    this.state.status = this.disconnectedStatus;
+    this.state.connectionStage = 'paused';
+    this.emit();
+  }
+  resume() {
+    if (!this.isVisible() || !this.api.accessToken) return Promise.resolve();
+    return this.state.telemetryConnected && this.api.socket ? this.refresh() : this.connect();
+  }
+  reconnect() {
+    this.suspend();
+    return this.resume();
+  }
+  syncNow() {
+    return this.state.telemetryConnected && this.api.socket ? this.refresh() : this.connect();
+  }
   poll() {
-    if (!this.isVisible() || !this.api.accessToken || this.api.auth?.refresh_uncertain) return;
+    if (!this.isVisible() || !this.api.accessToken) return;
+    if (this.telemetryStarted && !this.state.telemetryConnected) return;
     const live = this.state.status === 'connected' && Boolean(this.api.socket);
-    if (!live || this.now() - this.lastSyncedAt >= 120000) this.refresh().catch(() => {});
+    if (!live || this.now() - this.lastSyncedAt >= (this.api.auth?.refresh_uncertain ? 60000 : 120000)) this.refresh().catch(() => {});
   }
   scheduleRefresh() {
     const now = this.now();
@@ -156,8 +196,12 @@ export class Workspace {
     if (this.refreshing) return this.refreshing;
     if (!this.api.accessToken) { this.state.status = this.disconnectedStatus; this.emit(); return; }
     const epoch = this.epoch;
+    this.state.syncing = true;
+    this.emit();
     this.refreshing = (async () => {
       try {
+        if (this.api.auth?.refresh_uncertain) await this.api.recoverSession(await this.api.getHealth());
+        if (epoch !== this.epoch) return;
         await this.snapshot(false, false);
         if (epoch !== this.epoch) return;
         await this.sections(false);
@@ -167,16 +211,19 @@ export class Workspace {
         })));
         if (epoch !== this.epoch) return;
         this.lastSyncedAt = this.now();
-        if (epoch === this.epoch && this.api.socket && !this.api.auth?.refresh_uncertain) { this.state.status = 'connected'; this.state.error = ''; }
-        this.emit();
+        this.state.syncVersion++;
+        this.state.sessionWarning = this.api.auth?.refresh_uncertain ? 'Refresh token perlu verifikasi backend; workspace sementara hanya dapat dibaca.' : '';
+        if (this.state.telemetryConnected && this.api.socket) { this.state.status = 'connected'; this.state.error = ''; }
       } catch (error) {
         if (epoch !== this.epoch) return;
         this.state.error = formatApiError(error);
-        this.state.status = this.disconnectedStatus;
+        this.state.status = recoveryNeeded(error) ? 'recovery_required' : this.disconnectedStatus;
+        if (recoveryNeeded(error)) this.api.reconnectTelemetry?.();
         if (this.state.status === 'auth_required') this.api.stopTelemetry();
-        this.emit();
         throw error;
-      } finally { if (epoch === this.epoch) this.refreshing = null; }
+      } finally {
+        if (epoch === this.epoch) { this.refreshing = null; this.state.syncing = false; this.emit(); }
+      }
     })();
     return this.refreshing;
   }

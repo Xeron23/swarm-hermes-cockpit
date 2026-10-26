@@ -21,7 +21,7 @@
     "android:build": "node scripts/android-release.mjs build",
     "android:build:debug": "tauri android build --debug --apk",
     "icons": "tauri icon src-tauri/icons/source.png --output src-tauri/icons",
-    "test": "node --test scripts/updater.test.mjs scripts/public-release.test.mjs scripts/client.test.mjs scripts/release.test.mjs scripts/diagnostics.test.mjs scripts/windows-native.test.mjs scripts/theme.test.mjs scripts/mission.test.mjs scripts/session.test.mjs scripts/dashboard.test.mjs scripts/android-release.test.mjs && node scripts/test-native.mjs"
+    "test": "node --test scripts/updater.test.mjs scripts/public-release.test.mjs scripts/client.test.mjs scripts/release.test.mjs scripts/diagnostics.test.mjs scripts/windows-native.test.mjs scripts/theme.test.mjs scripts/mission.test.mjs scripts/session.test.mjs scripts/dashboard.test.mjs scripts/android-release.test.mjs scripts/resilience.test.mjs && node scripts/test-native.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.4",

@@ -10,10 +10,12 @@ import { updateBody, updateFooter } from './update_views.js';
 import { patchMarkup } from './dom_patch.js';
 import { selectOverviewActivities } from './activity_model.js';
 import { themeManager } from './theme_manager.js';
+import { bindConnectionLifecycle } from './connection_lifecycle.js';
+import { clearedConnectionError } from './connection_policy.js';
 
 const workspace = new Workspace(api);
 const updater = new AppUpdater();
-const ui = { page: 'overview', agentId: null, sessionId: null, agentFilter: 'all', eventFilter: 'all', target: 'auto', draft: '', error: '', pending: new Set(), logTraceId: null, connectionDiagnostic: '', themePanelOpen: false, missionDetailId: null };
+const ui = { page: 'overview', agentId: null, sessionId: null, agentFilter: 'all', eventFilter: 'all', target: 'auto', draft: '', error: '', errorScope: '', pending: new Set(), logTraceId: null, connectionDiagnostic: '', themePanelOpen: false, missionDetailId: null };
 let logTimer;
 let missionReturnFocus;
 function dismissMissionDetail() {
@@ -73,9 +75,11 @@ async function run(key, task) {
   if (ui.pending.has(key)) return;
   ui.pending.add(key);
   ui.error = '';
+  ui.errorScope = '';
   paint();
   try { await task(); } catch (error) {
     ui.error = formatApiError(error);
+    ui.errorScope = ['refresh', 'reconnect', 'test-connection'].includes(key) ? 'connection' : 'action';
     notify(ui.error);
     if ($('#connection-diagnostics')) {
       ui.connectionDiagnostic = ui.error;
@@ -83,12 +87,12 @@ async function run(key, task) {
     }
   } finally { ui.pending.delete(key); paint(); }
 }
-function connection() {
-  const footer = api.accessToken && workspace.state.status !== 'auth_required'
-    ? `${actionButton('reconnect', 'Hubungkan ulang')}${actionButton('revoke-confirm', 'Cabut akses perangkat')}${actionButton('forget-confirm', 'Hapus sesi lokal')}`
+function connection(repair = false) {
+  const footer = !repair && api.accessToken && workspace.state.status !== 'auth_required'
+    ? `${actionButton('reconnect', 'Hubungkan ulang')}${actionButton('revoke-confirm', 'Cabut akses perangkat')}${actionButton('forget-confirm', 'Hapus sesi lokal')}${api.auth?.refresh_uncertain ? actionButton('repair-session', 'Pasangkan ulang secara manual') : ''}`
     : '<button class="primary-button" type="submit" form="pair-form">Pasangkan perangkat</button>';
   const diagnostic = [...new Set([ui.connectionDiagnostic, workspace.state.error].filter(Boolean))].join('\n');
-  sheet('Server & jaringan', 'LAN langsung atau subnet Tailscale melalui Proxmox', connectionBody(api, workspace.state, diagnostic), `${actionButton('test-connection', 'Uji API tanpa pairing')}${actionButton('copy-connection', 'Salin laporan koneksi')}${footer}`);
+  sheet('Server & jaringan', 'LAN langsung atau subnet Tailscale melalui Proxmox', connectionBody(repair ? { accessToken: null } : api, workspace.state, diagnostic), `${actionButton('test-connection', 'Uji API tanpa pairing')}${actionButton('copy-connection', 'Salin laporan koneksi')}${footer}`);
   window.HermesNative.getRuntimeInfo().then(info => {
     const element = $('#native-build-info');
     if (element) element.textContent = `${info.platform} · ${info.version} · ${info.commit || 'commit tidak tersedia'} · build ${info.build_run || 'tidak tersedia'}`;
@@ -143,10 +147,25 @@ async function loadLogs(id) {
   if (status) status.textContent = logs.truncated ? 'Log dipotong oleh backend.' : 'Log dari backend.';
 }
 let workspacePaint;
+let lastSyncVersion = 0;
+let wasConnected = false;
 workspace.subscribe(() => {
+  const connected = workspace.state.status === 'connected';
+  if (connected && !wasConnected && ui.sessionId) {
+    const epoch = workspace.epoch;
+    workspace.loadMessages(ui.sessionId).catch(error => {
+      if (epoch === workspace.epoch) { workspace.state.sectionErrors.messages = formatApiError(error); workspace.emit(); }
+    });
+  }
+  wasConnected = connected;
+  if (clearedConnectionError(ui.errorScope, workspace.state, lastSyncVersion)) {
+    ui.error = ''; ui.errorScope = ''; ui.connectionDiagnostic = '';
+  }
+  lastSyncVersion = workspace.state.syncVersion;
+
   if (!workspacePaint) workspacePaint = requestAnimationFrame(() => { workspacePaint = null; paint(); });
   if ($('#connection-stage')) $('#connection-stage').textContent = stageText(workspace.state.connectionStage);
-  if ($('#connection-diagnostics') && workspace.state.error) {
+  if ($('#connection-diagnostics')) {
     $('#connection-diagnostics').textContent = [...new Set([ui.connectionDiagnostic, workspace.state.error].filter(Boolean))].join('\n');
   }
   const event = workspace.state.events[0];
@@ -245,8 +264,9 @@ document.addEventListener('click', event => {
       await window.HermesNative.copyText(text);
       notify('Laporan koneksi disalin tanpa kode pairing atau token.');
     }
-    if (action === 'refresh') { await workspace.refresh(); notify('Snapshot diperbarui dari backend.'); }
-    if (action === 'reconnect') { close(); await workspace.connect(); }
+    if (action === 'refresh') { await workspace.syncNow(); notify(workspace.state.status === 'connected' ? 'Workspace diperbarui dari backend.' : 'Koneksi belum siap; status percobaan ulang ditampilkan pada dashboard.'); }
+    if (action === 'repair-session') connection(true);
+    if (action === 'reconnect') { close(); await workspace.reconnect(); }
     if (action === 'node-detail') nodeDetail(id);
     if (action === 'new-mission') newMission();
     if (action === 'agent-profile') {
@@ -389,19 +409,12 @@ document.addEventListener('keydown', event => {
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
   }
 });
-window.addEventListener('online', () => { if (api.accessToken) workspace.connect(); });
+const disposeConnection = bindConnectionLifecycle(workspace);
 window.addEventListener('online', () => updater.check());
-window.addEventListener('beforeunload', () => updater.dispose());
-window.addEventListener('offline', () => { workspace.state.status = 'offline'; workspace.state.error = 'Perangkat tidak memiliki koneksi jaringan.'; workspace.emit(); });
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && api.accessToken) {
-    if (workspace.state.status === 'connected' && api.socket) workspace.refresh().catch(() => {});
-    else workspace.connect();
-  }
-});
+window.addEventListener('beforeunload', () => { disposeConnection(); updater.dispose(); });
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && (!updater.state.checkedAt || Date.now() - new Date(updater.state.checkedAt).getTime() > updater.interval)) updater.check();
 });
 updater.start();
 paint();
-workspace.connect();
+// The lifecycle starts auto-connect and preserves credentials across close/resume.

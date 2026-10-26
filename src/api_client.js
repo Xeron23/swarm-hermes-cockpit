@@ -4,6 +4,7 @@ import { isTauri } from '@tauri-apps/api/core';
 import { transportFailure, redactDiagnostic } from './diagnostics.js';
 import { normalizePairingCode, pairingCodeError } from './pairing.js';
 import { loadSession, saveSession, clearSession, checkStorageReady, AUTH_KEY } from './session_storage.js';
+import { recoveryNeeded, retryableRead, reconnectDelay, recoveryRequestId } from './connection_policy.js';
 
 export class ApiError extends Error {
   constructor(message, { status = 0, code = 'NETWORK_ERROR', retryable = false, details = {}, endpoint, method } = {}) {
@@ -25,9 +26,9 @@ export const compareSequence = (a, b) => {
 };
 
 export class HermesApiClient {
-  constructor({ baseUrl = SERVER_URL, storage = globalThis.localStorage, fetcher = httpFetch, socketFactory = openSocket, timeout = 12000, retryDelay = 1000 } = {}) {
+  constructor({ baseUrl = SERVER_URL, storage = globalThis.localStorage, fetcher = httpFetch, socketFactory = openSocket, timeout = 22000, retryDelay = 1000, readRetryDelay = 400, random = Math.random, now = () => Date.now() } = {}) {
     this.baseUrl = baseUrl.replace(/\/$/, '');
-    Object.assign(this, { storage, fetcher, socketFactory, timeout, retryDelay });
+    Object.assign(this, { storage, fetcher, socketFactory, timeout, retryDelay, readRetryDelay, random, now });
     this.auth = null;
     this.authRejection = null;
     this.sessionStatus = 'missing';
@@ -53,6 +54,8 @@ export class HermesApiClient {
     }
     this.authRejection = null;
     this.auth = { ...value, server: this.baseUrl };
+    delete this.auth.refresh_uncertain;
+    delete this.auth.refresh_attempt_id;
     const saved = saveSession(this.auth, this.storage);
     this.sessionPersistence = saved.status || (saved.ok ? 'saved' : 'write_failed');
     this.sessionStatus = saved.ok ? 'valid' : 'write_failed';
@@ -107,7 +110,7 @@ export class HermesApiClient {
   async request(endpoint, options = {}) {
     const tokenUsed = this.accessToken;
     const epoch = this.authEpoch;
-    try { return await this.raw(endpoint, options); } catch (error) {
+    try { return await this.readOrSend(endpoint, options); } catch (error) {
       if (epoch !== this.authEpoch) throw error;
       if (isBackendCredentialRejection(error, this.baseUrl)) {
         this.rejectCredentials(error);
@@ -122,12 +125,74 @@ export class HermesApiClient {
       }
     }
   }
+  async readOrSend(endpoint, options = {}, authenticated = true) {
+    const epoch = this.authEpoch, generation = this.generation;
+    try { return await this.raw(endpoint, options, authenticated); } catch (error) {
+      if (!['GET', 'HEAD'].includes(options.method || 'GET') || !retryableRead(error)) throw error;
+      await new Promise(resolve => setTimeout(resolve, this.readRetryDelay));
+      if (epoch !== this.authEpoch || generation !== this.generation) throw new ApiError('Permintaan sudah dihentikan.', { code: 'SESSION_CLOSED' });
+      return this.raw(endpoint, options, authenticated);
+    }
+  }
+  async recoverSession(health) {
+    // A local rotating POST owns its intent until it settles. Never erase it mid-flight.
+    if (this.refreshing) { try { await this.refreshing; } catch {} }
+    if (!this.auth?.refresh_uncertain) return;
+    if (this.recovering) return this.recovering;
+    const epoch = this.authEpoch;
+    this.recovering = (async () => {
+      if (health?.capabilities?.refresh_token_status_v1 !== true) {
+        // Verify access without invoking refresh. Health alone cannot validate credentials.
+        try { await this.raw('/api/v1/bootstrap'); }
+        catch (error) {
+          if (epoch === this.authEpoch && isBackendCredentialRejection(error, this.baseUrl)) this.rejectCredentials(error);
+          if (error.status !== 401 || this.authenticationRequired) throw error;
+          throw new ApiError('Refresh token perlu diverifikasi backend. Sesi tetap disimpan; rotasi lama tidak dikirim ulang.', { code: 'REFRESH_RECOVERY_REQUIRED' });
+        }
+        return; // Access may still work; retain uncertainty and keep mutations disabled.
+      }
+      const requestId = recoveryRequestId();
+      let value;
+      try {
+        value = await this.raw('/api/v1/auth/refresh-status', { method: 'POST', body: JSON.stringify({
+          refresh_token: this.auth.refresh_token, request_id: requestId,
+          workspace_id: this.workspaceId, device_id: this.deviceId
+        }) }, false);
+      } catch (error) {
+        if (epoch === this.authEpoch && isBackendCredentialRejection(error, this.baseUrl)) this.rejectCredentials(error);
+        if (error.status === 0 || [500, 502, 503, 504].includes(error.status)) {
+          throw new ApiError('Verifikasi sesi backend belum selesai dan akan dicoba lagi. Refresh token tersimpan tidak dirotasi ulang.', { code: 'REFRESH_RECOVERY_REQUIRED', endpoint: '/api/v1/auth/refresh-status', method: 'POST', details: { cause: error.code } });
+        }
+        throw error;
+      }
+      if (epoch !== this.authEpoch || !this.auth) throw new ApiError('Sesi sudah berubah.', { code: 'SESSION_CLOSED' });
+      if (value?.request_id !== requestId || value.workspace_id !== this.workspaceId || value.device_id !== this.deviceId || value.rotation_performed !== false || value.refresh_token_state !== 'current') {
+        throw new ApiError('Backend belum membuktikan refresh token tersimpan masih current. Tidak ada token yang dikirim ulang.', { code: 'REFRESH_RECOVERY_REQUIRED' });
+      }
+      const restored = { ...this.auth };
+      delete restored.refresh_uncertain;
+      delete restored.refresh_attempt_id;
+      const saved = saveSession(restored, this.storage);
+      if (!saved.ok) throw new ApiError('Penyimpanan sesi belum dapat diperbarui.', { code: 'SESSION_STORAGE_FAILED' });
+      this.auth = restored;
+      this.sessionPersistence = saved.status;
+    })().finally(() => { this.recovering = null; });
+    return this.recovering;
+  }
   async refreshToken() {
     if (this.refreshing) return this.refreshing;
     if (!this.auth?.refresh_token) throw new ApiError('Pasangkan perangkat terlebih dahulu.', { status: 401, code: 'UNPAIRED' });
     if (this.auth.refresh_uncertain) throw new ApiError('Hasil rotasi token belum diketahui. Sesi perangkat tetap disimpan; pemulihan perlu diverifikasi backend sebelum refresh dapat dilanjutkan.', { code: 'REFRESH_UNCERTAIN' });
     const refreshToken = this.auth.refresh_token;
     const epoch = this.authEpoch;
+    // Persist intent before a rotating POST: a process close must not replay it.
+    const previous = this.auth;
+    this.auth = { ...previous, refresh_uncertain: true, refresh_attempt_id: recoveryRequestId() };
+    const intent = saveSession(this.auth, this.storage);
+    if (this.storage && !intent.ok) {
+      this.auth = previous;
+      throw new ApiError('Rotasi ditunda karena penyimpanan sesi tidak dapat ditulis.', { code: 'SESSION_STORAGE_FAILED' });
+    }
     this.refreshing = (async () => {
       try {
         const value = await this.raw('/api/v1/auth/refresh', { method: 'POST', body: JSON.stringify({ refresh_token: refreshToken }) }, false);
@@ -166,7 +231,7 @@ export class HermesApiClient {
     await this.request('/api/v1/auth/revoke', { method: 'POST', body: '{}' });
     this.clearTokens();
   }
-  getHealth() { return this.raw('/health/ready', {}, false); }
+  getHealth() { return this.readOrSend('/health/ready', {}, false); }
   getBootstrap() { return this.request('/api/v1/bootstrap'); }
   getNodes() { return this.request('/api/v1/nodes'); }
   getNode(id) { return this.request(`/api/v1/nodes/${encodeURIComponent(id)}`); }
@@ -198,31 +263,37 @@ export class HermesApiClient {
     clearTimeout(this.reconnectTimer);
     clearInterval(this.pingTimer);
     this.reconnectTimer = null;
+    this.retryTelemetry = null;
+    this.reconnectTelemetry = null;
     const socket = this.socket;
     this.socket = null;
     if (socket) Promise.resolve(socket.close()).catch(() => {});
   }
-  startTelemetry({ onEvent, onStatus, beforeConnect = async () => {}, onStage = () => {} }) {
+  startTelemetry({ onEvent, onStatus, beforeConnect = async () => {}, onStage = () => {}, onRetry = () => {} }) {
     this.stopTelemetry();
     const generation = this.generation;
     let attempts = 0;
     let connectionEpoch = 0;
+    let inFlight = null;
     const current = () => generation === this.generation && Boolean(this.accessToken);
-    const reconnect = () => {
+    const reconnect = (recovery = false) => {
       if (!current() || this.reconnectTimer) return;
       connectionEpoch++;
       clearInterval(this.pingTimer);
       const previous = this.socket;
       this.socket = null;
-      onStatus('reconnecting');
+      const delay = recovery ? 60000 : reconnectDelay(attempts++, this.retryDelay, this.random);
+      onStatus(recovery ? 'recovery_required' : 'reconnecting');
+      onRetry({ attempt: attempts, delay });
       this.reconnectTimer = setTimeout(() => {
         this.reconnectTimer = null;
         connect();
-      }, Math.min(this.retryDelay * 2 ** Math.min(attempts++, 5), 30000));
+      }, delay);
       if (previous) Promise.resolve(previous.close()).catch(() => {});
     };
-    const connect = async () => {
+    const performConnect = async () => {
       if (!current()) return;
+      onStatus('connecting');
       const attempt = ++connectionEpoch;
       try {
         await beforeConnect();
@@ -233,11 +304,13 @@ export class HermesApiClient {
         if (!current()) { if (!this.accessToken) onStatus(this.authenticationRequired ? 'auth_required' : 'unpaired'); return; }
         const url = `${this.baseUrl.replace(/^http/, 'ws')}/ws/telemetry?ticket=${encodeURIComponent(ticket.ticket)}&after_seq=${encodeURIComponent(this.lastEventSeq)}`;
         let closed = false;
+        let lastPong = this.now();
         onStage('telemetry');
         const socket = await this.socketFactory(url, ticket.subprotocol, {
           close: () => { closed = true; if (attempt === connectionEpoch) reconnect(); },
           message: text => {
-            if (!current() || attempt !== connectionEpoch || text === 'pong') return;
+            if (!current() || attempt !== connectionEpoch) return;
+            if (text === 'pong') { lastPong = this.now(); return; }
             let event;
             try { event = JSON.parse(text); } catch { return; }
             const seq = sequence(event.seq);
@@ -256,21 +329,35 @@ export class HermesApiClient {
         this.socket = socket;
         attempts = 0;
         onStatus('connected');
-        this.pingTimer = setInterval(() => { Promise.resolve(socket.send('ping')).catch(reconnect); }, 15000);
+        this.pingTimer = setInterval(() => {
+          if (!current() || attempt !== connectionEpoch) return;
+          if (this.now() - lastPong > 45000) { reconnect(); return; }
+          Promise.resolve(socket.send('ping')).catch(() => reconnect());
+        }, 15000);
       } catch (error) {
         if (!this.accessToken) {
           onStatus(this.authenticationRequired ? 'auth_required' : 'unpaired', error);
           return;
         }
-        if (error.code === 'REFRESH_UNCERTAIN') {
-          onStatus('offline', error);
-          return; // Keep credentials and do not replay a possibly consumed refresh token.
+        if (recoveryNeeded(error) || (this.auth?.refresh_uncertain && error.endpoint === '/api/v1/auth/refresh')) {
+          onStatus('recovery_required', error);
+          reconnect(true); // Probe status later; never replay the uncertain rotating POST.
+          return;
         }
         if (generation !== this.generation) return;
         onStatus('offline', error);
-        reconnect();
+        if (retryableRead(error) || error.retryable !== false) reconnect();
       }
     };
+    const connect = () => inFlight || (inFlight = performConnect().finally(() => { inFlight = null; }));
+    this.retryTelemetry = () => {
+      if (!current()) return Promise.resolve();
+      if (this.socket && !inFlight) return Promise.resolve();
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+      return connect();
+    };
+    this.reconnectTelemetry = () => reconnect(true);
     return connect();
   }
 }
