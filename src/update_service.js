@@ -15,7 +15,7 @@ export const updateService = {
   async check(platform) {
     if (platform === 'windows') {
       const { check } = await import('@tauri-apps/plugin-updater');
-      return check({ timeout: 15000 });
+      return check({ timeout: 20000, headers: { 'Cache-Control': 'no-cache' } });
     }
     if (platform === 'android') {
       const metadata = await invoke('android_update_check');

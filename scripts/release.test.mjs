@@ -121,7 +121,7 @@ test('an existing published version is left intact and its source commit is chec
   const tagged = releaseMetadata({ ...env, GITHUB_REF: 'refs/tags/v0.1.1' }, '0.1.1');
   const gh = args => {
     assert.equal(args[1], 'view');
-    return { status: 0, stdout: JSON.stringify({ isDraft: false }) };
+    return { status: 0, stdout: JSON.stringify({ isDraft: false, assets: [{ name: 'fixture.apk', state: 'uploaded', size: 11 }, { name: 'fixture.exe', state: 'uploaded', size: 11 }, { name: 'fixture.msi', state: 'uploaded', size: 11 }, { name: 'SHA256SUMS.txt', state: 'uploaded', size: 219 }] }) };
   };
   assert.equal(publishRelease({ directory, metadata: tagged, repository: 'owner/repo', gh, resolveTag: () => env.GITHUB_SHA }).existing, true);
   assert.throws(() => publishRelease({ directory, metadata: tagged, repository: 'owner/repo', gh, resolveTag: () => 'b'.repeat(40) }), /another commit/);

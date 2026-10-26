@@ -243,7 +243,7 @@ jobs:
     permissions:
       contents: write
     concurrency:
-      group: hermes-public-release-promotion
+      group: hermes-stable-release-publication
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
@@ -258,32 +258,29 @@ jobs:
           path: release-assets
           merge-multiple: true
       - run: npm ci
-      - name: Prepare optional signed feed before publishing the version release
+      - name: Prepare optional signed manifest for the version release
         id: feed
         run: node scripts/publish-public.mjs prepare release-assets
         env:
           HERMES_UPDATER_SIGNING_REQUIRED: ${{ needs.validate.outputs.updater_signing }}
-      - name: Publish only after all platform assets are ready
+      - name: Publish complete version release and select stable latest
+        id: release
         run: node scripts/release.mjs publish release-assets
         env:
           GH_TOKEN: ${{ github.token }}
-      - name: Promote the same-repository update channel
-        if: ${{ steps.feed.outputs.signed == 'true' }}
-        run: node scripts/publish-public.mjs release-assets
-        env:
-          GH_TOKEN: ${{ github.token }}
           HERMES_UPDATER_SIGNING_REQUIRED: ${{ needs.validate.outputs.updater_signing }}
-      - name: Verify anonymous public update feed
-        if: ${{ steps.feed.outputs.signed == 'true' }}
-        run: |
-          curl --fail --location --retry 3 --retry-all-errors --retry-delay 5 --output public-latest.json https://github.com/Xeron23/swarm-hermes-cockpit/releases/download/updates/latest.json
-          node -e "const f = require('./public-latest.json'); if (!f.version || !f.platforms?.['windows-x86_64'] || !f.platforms?.['android-aarch64']) throw new Error('Incomplete public update feed')"
+      - name: Verify anonymous version and latest manifests
+        if: ${{ steps.release.outputs.signed == 'true' }}
+        run: node scripts/verify-release-feed.mjs
+        env:
+          HERMES_VERIFY_LATEST: ${{ steps.release.outputs.latest }}
       - name: Summarize release mode
         env:
-          UPDATE_SIGNED: ${{ steps.feed.outputs.signed }}
+          UPDATE_SIGNED: ${{ steps.release.outputs.signed }}
+          STABLE_LATEST: ${{ steps.release.outputs.latest }}
         run: |
           if [ "$UPDATE_SIGNED" = "true" ]; then
-            echo 'Release published with signed in-app updater metadata.' >> "$GITHUB_STEP_SUMMARY"
+            echo "Signed packages and latest.json are in the version release. Stable latest: $STABLE_LATEST" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo 'Bootstrap installers published. Signing is not configured; update feed generation, promotion and anonymous feed verification were skipped. Any existing signed channel is unchanged.' >> "$GITHUB_STEP_SUMMARY"
+            echo 'Bootstrap installers published as a prerelease. No signed manifest or stable latest promotion.' >> "$GITHUB_STEP_SUMMARY"
           fi

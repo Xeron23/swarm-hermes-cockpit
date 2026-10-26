@@ -40,7 +40,9 @@ const updater = await json('src-tauri/updater.json');
 assert.equal(base.plugins.updater.pubkey, updater.publicKey);
 assert.deepEqual(base.plugins.updater.endpoints, updater.endpoints);
 assert.equal(base.plugins.updater.requireSignedVersion, true);
-assert.deepEqual(updater.endpoints, [`https://github.com/${updater.repository}/releases/download/${updater.channelTag}/latest.json`]);
+assert.equal(base.plugins.updater.allowDowngrades, false);
+assert.equal('channelTag' in updater, false);
+assert.deepEqual(updater.endpoints, [`https://github.com/${updater.repository}/releases/latest/download/latest.json`]);
 assert.deepEqual((await json('src-tauri/capabilities/windows-updater.json')).platforms, ['windows']);
 assert.deepEqual((await json('src-tauri/capabilities/android-updater.json')).platforms, ['android']);
 

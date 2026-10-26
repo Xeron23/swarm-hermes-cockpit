@@ -21,6 +21,6 @@ const config = { ...JSON.parse(readFileSync(configPath, 'utf8')), publicKey };
 writeFileSync(path.join(root, 'src-tauri/updater.json'), JSON.stringify(config, null, 2) + '\n');
 const tauriPath = path.join(root, 'src-tauri/tauri.conf.json');
 const tauri = JSON.parse(readFileSync(tauriPath, 'utf8'));
-tauri.plugins = { ...tauri.plugins, updater: { pubkey: publicKey, endpoints: config.endpoints, requireSignedVersion: true, windows: { installMode: 'passive' } } };
+tauri.plugins = { ...tauri.plugins, updater: { pubkey: publicKey, endpoints: config.endpoints, requireSignedVersion: true, allowDowngrades: false, windows: { installMode: 'passive' } } };
 writeFileSync(tauriPath, JSON.stringify(tauri, null, 2) + '\n');
 console.log(`Public updater configuration written. Private key remains at ${filename}; add its contents to GitHub Actions secret TAURI_SIGNING_PRIVATE_KEY.`);

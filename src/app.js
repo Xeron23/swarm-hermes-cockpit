@@ -100,18 +100,19 @@ function connection() {
     }
   }).catch(() => { if ($('#native-build-info')) $('#native-build-info').textContent = 'Identitas runtime belum dapat dibaca.'; });
 }
-function appUpdates() {
-  sheet('Pembaruan aplikasi', 'Release resmi Hermes Cockpit', updateBody(updater.state), updateFooter(updater.state));
+function appUpdates(check = true) {
+  sheet('Pembaruan aplikasi', 'Release stabil resmi Hermes Cockpit', updateBody(updater.state), updateFooter(updater.state));
+  if (check) { if (updater.state.platform) updater.check(); else updater.start(); }
 }
 let updatePaint;
 updater.subscribe(state => {
-  ui.updateReady = ['available', 'ready'].includes(state.status);
-  if (!updatePaint) updatePaint = setTimeout(() => {
+  clearTimeout(updatePaint);
+  updatePaint = setTimeout(() => {
     updatePaint = null;
     paint();
     if ($('#updates-panel')) {
-      document.querySelector('.sheet-body').innerHTML = updateBody(updater.state);
-      document.querySelector('.sheet-footer').innerHTML = updateFooter(updater.state);
+      patchMarkup(document.querySelector('.sheet-body'), updateBody(updater.state));
+      patchMarkup(document.querySelector('.sheet-footer'), updateFooter(updater.state));
     }
   }, 100);
 });
@@ -215,8 +216,10 @@ document.addEventListener('click', event => {
     Promise.resolve().then(async () => {
       if (action === 'update-check') await updater.check();
       if (action === 'update-download') await updater.download();
+      if (action === 'update-apply-confirm') sheet('Unduh dan pasang pembaruan?', updater.state.version || '', `<p>Paket akan diunduh dan diverifikasi sebelum pemasangan dimulai. ${updater.state.platform === 'android' ? 'Android tetap meminta izin dan konfirmasi pemasangan.' : 'Aplikasi Windows akan ditutup dan dimulai ulang oleh installer.'}</p>${ui.draft ? '<p>Simpan pesan yang belum dikirim sebelum melanjutkan.</p>' : ''}`, actionButton('update-apply', 'Lanjutkan pembaruan'));
+      if (action === 'update-apply') { appUpdates(false); await updater.apply(); }
       if (action === 'update-confirm') sheet('Pasang pembaruan?', updater.state.version || '', `<p>${updater.state.platform === 'android' ? 'Android akan meminta konfirmasi untuk memperbarui aplikasi.' : 'Aplikasi akan ditutup sebentar, diperbarui, lalu dibuka kembali.'}</p>${ui.draft ? '<p>Pesan yang belum dikirim akan hilang saat aplikasi ditutup.</p>' : ''}`, actionButton('update-install', 'Pasang sekarang'));
-      if (action === 'update-install') { appUpdates(); await updater.install(); }
+      if (action === 'update-install') { appUpdates(false); await updater.install(); }
     }).catch(error => updater.reportError(error));
     return;
   }

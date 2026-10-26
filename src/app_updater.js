@@ -1,80 +1,123 @@
 import { updateService } from './update_service.js';
 
 const supported = platform => ['windows', 'android'].includes(platform);
+const inProgress = status => ['checking', 'downloading', 'verifying', 'installing', 'relaunching'].includes(status);
 export function updateError(error) {
   const raw = typeof error === 'string' ? error : String(error?.message || '');
-  if (error?.code === 'UPDATE_CERTIFICATE_MISMATCH') return 'Sertifikat APK berbeda dari aplikasi terpasang. Paket ini belum dapat dipasang sebagai pembaruan.';
+  if (error?.code === 'UPDATE_CERTIFICATE_MISMATCH') return 'Sertifikat APK berbeda dari aplikasi terpasang. Gunakan paket dengan identitas penandatangan yang sama.';
   if (error?.code === 'UPDATE_PACKAGE_MISMATCH') return 'APK bukan untuk Hermes Cockpit pada perangkat ini.';
+  if (error?.code === 'UPDATE_DOWNGRADE_REJECTED') return 'Android menolak paket yang lebih lama dari aplikasi terpasang.';
   if (/signature|signed.version|public.?key|minisign/i.test(raw) || error?.code === 'UPDATE_VERIFICATION_FAILED') return 'Tanda tangan paket tidak sesuai. Pembaruan belum dapat dipasang; periksa release resmi berikutnya.';
-  if (error?.code === 'UPDATE_FEED_NOT_READY' || /404/i.test(raw)) return 'Belum tersedia paket pembaruan pada layanan release.';
+  if (error?.code === 'UPDATE_FEED_NOT_READY' || /404/i.test(raw)) return 'Rilis stabil bertanda tangan belum tersedia. Periksa lagi setelah release resmi diterbitkan.';
   if (error?.code === 'UPDATE_FEED_INVALID') return 'Format feed pembaruan tidak valid. Sesi perangkat tetap tersimpan.';
   if (error?.code === 'UPDATE_PLATFORM_UNAVAILABLE') return 'Paket pembaruan untuk perangkat ini belum tersedia.';
   if (error?.code === 'UPDATE_STORAGE_ERROR') return 'Penyimpanan perangkat belum dapat menampung pembaruan.';
-  if (error?.code === 'UPDATE_INSTALL_FAILED') return 'Pemasangan belum berhasil. Periksa izin pemasangan pada perangkat lalu coba lagi.';
+  if (error?.code === 'UPDATE_INSTALL_FAILED') return 'Pemasangan belum berhasil. Periksa pembaruan kembali sebelum mencoba lagi.';
   return 'Pembaruan belum dapat diselesaikan. Periksa koneksi internet lalu coba lagi.';
 }
 
 export class AppUpdater {
   constructor({ service = updateService, interval = 6 * 60 * 60 * 1000 } = {}) {
-    this.service = service;
-    this.interval = interval;
-    this.listeners = new Set();
-    this.update = null;
-    this.state = { status: 'idle', platform: null, version: null, notes: '', date: null, checkedAt: null, bytes: 0, total: null, error: '', notice: '' };
+    this.service = service; this.interval = interval; this.listeners = new Set();
+    this.update = null; this.epoch = 0; this.disposed = false; this.started = false;
+    this.state = { status: 'idle', platform: null, version: null, notes: '', date: null, checkedAt: null,
+      bytes: 0, total: null, verified: false, error: '', errorStage: null, notice: '' };
   }
   subscribe(listener) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
-  emit() { for (const listener of this.listeners) listener(this.state); }
+  emit() { if (!this.disposed) for (const listener of this.listeners) listener(this.state); }
   set(value) { Object.assign(this.state, value); this.emit(); }
-  get busy() { return ['checking', 'downloading', 'verifying', 'installing'].includes(this.state.status); }
-  reportError(error) {
-    // This controller owns update state only; it has no workspace/auth/storage dependency.
-    this.set({ status: 'error', error: updateError(error) });
-  }
-  async start() {
-    try {
-      const platform = await this.service.platform();
-      this.set({ platform, status: supported(platform) ? 'idle' : 'unsupported' });
-      if (!supported(platform)) return;
-      await this.check();
-      this.timer = setInterval(() => this.check(), this.interval);
-    } catch (error) { this.reportError(error); }
+  get busy() { return inProgress(this.state.status); }
+  active(epoch) { return !this.disposed && epoch === this.epoch; }
+  reportError(error, errorStage = 'check') { this.set({ status: 'error', verified: false, error: updateError(error), errorStage }); }
+  start() {
+    if (this.disposed || this.started) return Promise.resolve();
+    if (this.startPromise) return this.startPromise;
+    const epoch = this.epoch;
+    this.startPromise = (async () => {
+      try {
+        const platform = await this.service.platform();
+        if (!this.active(epoch)) return;
+        this.started = true;
+        this.set({ platform, status: supported(platform) ? 'idle' : 'unsupported' });
+        if (!supported(platform)) return;
+        await this.check();
+        if (!this.disposed) this.timer = setInterval(() => this.check(), this.interval);
+      } catch (error) { if (this.active(epoch)) this.reportError(error); }
+      finally { this.startPromise = null; }
+    })();
+    return this.startPromise;
   }
   async check() {
-    if (!supported(this.state.platform) || this.busy || this.state.status === 'ready') return;
-    this.set({ status: 'checking', version: null, notes: '', date: null, error: '', notice: '' });
+    if (this.disposed || !supported(this.state.platform) || this.busy || ['ready', 'installed'].includes(this.state.status)) return;
+    const epoch = ++this.epoch;
+    this.set({ status: 'checking', version: null, notes: '', date: null, verified: false, bytes: 0, total: null, error: '', errorStage: null, notice: '' });
     try {
-      await this.update?.close().catch(() => {});
-      this.update = null;
+      await this.update?.close().catch(() => {}); this.update = null;
       const update = await this.service.check(this.state.platform);
+      if (!this.active(epoch)) { await update?.close().catch(() => {}); return; }
       this.update = update;
-      this.set({ status: update ? 'available' : 'current', version: update?.version || null, notes: String(update?.body || ''), date: update?.date || null, checkedAt: new Date().toISOString(), bytes: 0, total: null });
-      // Checking is automatic; downloading and installing require user clicks.
-    } catch (error) { this.reportError(error); }
+      this.set({ status: update ? 'available' : 'current', version: update?.version || null,
+        notes: String(update?.body || '').slice(0, 32000), date: update?.date || null, checkedAt: new Date().toISOString() });
+    } catch (error) { if (this.active(epoch)) this.reportError(error, 'check'); }
   }
-  async download() {
-    if (!this.update || this.busy || this.state.status === 'ready') return;
-    this.set({ status: 'downloading', bytes: 0, total: null, error: '', notice: '' });
+  async apply() {
+    if (this.state.status === 'ready') return this.install();
+    return this.download({ installAfterDownload: true });
+  }
+  async download({ installAfterDownload = false } = {}) {
+    if (this.disposed || !this.update || this.busy || !['available', 'error'].includes(this.state.status)
+      || this.state.status === 'error' && this.state.errorStage !== 'download') return;
+    const epoch = ++this.epoch, update = this.update;
+    this.set({ status: 'downloading', bytes: 0, total: null, verified: false, error: '', errorStage: null, notice: '' });
     try {
-      await this.update.download(event => {
-        if (event.event === 'Started') this.set({ bytes: 0, total: event.data?.contentLength || null });
-        if (event.event === 'Progress') this.set({ bytes: this.state.bytes + Math.max(0, Number(event.data?.chunkLength) || 0) });
+      await update.download(event => {
+        if (!this.active(epoch) || !['downloading', 'verifying'].includes(this.state.status)) return;
+        if (event.event === 'Started') {
+          const total = Number(event.data?.contentLength);
+          this.set({ bytes: 0, total: Number.isFinite(total) && total > 0 ? total : null });
+        }
+        if (event.event === 'Progress') {
+          const chunk = Number(event.data?.chunkLength);
+          if (Number.isFinite(chunk) && chunk > 0) this.set({ bytes: this.state.bytes + chunk });
+        }
         if (event.event === 'Finished') this.set({ status: 'verifying' });
       }, { timeout: 300000 });
-      this.set({ status: 'ready' });
-    } catch (error) { this.set({ status: 'error', error: updateError(error) }); }
+      if (!this.active(epoch)) return;
+      // Finished means transfer EOF. Only resolved native download means verified.
+      this.set({ status: 'ready', verified: true });
+      if (installAfterDownload) await this.install();
+    } catch (error) { if (this.active(epoch)) this.reportError(error, 'download'); }
+    finally {
+      if (this.disposed && !['installing', 'relaunching', 'installed'].includes(this.state.status)) {
+        await update.close().catch(() => {});
+        if (this.update === update) this.update = null;
+      }
+    }
   }
   async install() {
-    if (!this.update || this.state.status !== 'ready') return;
-    this.set({ status: 'installing', error: '', notice: '' });
+    if (this.disposed || !this.update || this.state.status !== 'ready' || !this.state.verified) return;
+    const epoch = ++this.epoch;
+    this.set({ status: 'installing', error: '', errorStage: null, notice: '' });
     try {
       const result = await this.update.install({ restartAfterInstall: true });
-      if (result?.status === 'cancelled') this.set({ status: 'ready', notice: 'Pemasangan dibatalkan. Paket masih siap dipasang.' });
+      if (!this.active(epoch)) return;
+      if (this.state.platform === 'windows') this.set({ status: 'relaunching', notice: 'Installer Windows dimulai. Aplikasi akan dibuka kembali setelah pembaruan.' });
+      else if (result?.status === 'cancelled') this.set({ status: 'ready', notice: 'Pemasangan dibatalkan. Paket terverifikasi masih siap dipasang.' });
       else if (result?.status === 'permission_required') this.set({ status: 'ready', notice: 'Izinkan pemasangan dari Hermes Cockpit pada pengaturan Android, lalu coba lagi.' });
-      else this.set({ status: 'installed' });
-    } catch (error) { this.set({ status: 'ready', error: updateError(error) }); }
+      else if (result?.status === 'installed') this.set({ status: 'installed' });
+      else throw { code: 'UPDATE_INSTALL_FAILED' };
+    } catch (error) {
+      if (!this.active(epoch)) return;
+      if (this.state.platform === 'android' && ['UPDATE_CERTIFICATE_MISMATCH', 'UPDATE_PACKAGE_MISMATCH', 'UPDATE_DOWNGRADE_REJECTED'].includes(error?.code)) {
+        this.set({ status: 'ready', error: updateError(error), errorStage: 'install' });
+        return;
+      }
+      await this.update?.close().catch(() => {}); this.update = null;
+      this.set({ version: null }); this.reportError(error, 'install');
+    }
   }
   async dispose() {
-    clearInterval(this.timer);
-    if (this.state.status !== 'installing') await this.update?.close().catch(() => {});
+    this.disposed = true; this.epoch++; clearInterval(this.timer);
+    if (!['installing', 'relaunching', 'installed'].includes(this.state.status)) await this.update?.close().catch(() => {});
   }
 }
