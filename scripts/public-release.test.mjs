@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { publishPublicRelease, createUpdateFeed } from './publish-public.mjs';
-import { prepareArtifacts } from './release.mjs';
+import { publishPublicRelease, createUpdateFeed, preparePublicUpdate, runPublicRelease } from './publish-public.mjs';
+import { prepareArtifacts, publishRelease } from './release.mjs';
 import { maintainSigning } from './android-signing.mjs';
 
 function fixture(t, { signed = true, oldVersion, incomplete = false, privateRepo = false } = {}) {
@@ -32,7 +32,7 @@ function fixture(t, { signed = true, oldVersion, incomplete = false, privateRepo
       return ok('');
     }
     if (command === 'create' || command === 'upload') {
-      const release = releases.get(tag) || { isDraft: true, assets: [], body: `Source: ${metadata.sha}` };
+      const release = releases.get(tag) || { isDraft: true, assets: [], body: `Source: ${metadata.sha}`, tagName: tag, isPrerelease: metadata.prerelease, url: `https://github.com/${config.repository}/releases/tag/${tag}` };
       const end = args.findIndex((value, i) => i > 2 && value.startsWith('--'));
       for (const filename of args.slice(3, end < 0 ? args.length : end)) {
         const name = path.basename(filename);
@@ -47,7 +47,7 @@ function fixture(t, { signed = true, oldVersion, incomplete = false, privateRepo
     throw new Error(`Unexpected mock command ${args}`);
   };
   const publish = () => publishPublicRelease({ directory, metadata, config, run: '30', attempt: '1', gh });
-  return { directory, config, metadata, calls, releases, publish };
+  return { directory, config, metadata, calls, releases, publish, gh };
 }
 
 test('public channel is promoted only after a complete immutable signed release', t => {
@@ -109,4 +109,76 @@ test('an unsigned version/build change cannot reuse another build signature', t 
 test('Android signing backup refuses public storage and does not need API access when unconfigured', () => {
   assert.deepEqual(maintainSigning({ mode: 'restore' }), { configured: false });
   assert.throws(() => maintainSigning({ mode: 'save', secret: 'fixture', repository: 'owner/public', gh: () => ({ status: 0, stdout: '{"isPrivate":false}' }) }), /private source repository/);
+});
+
+function cliOptions(f, extra = {}) {
+  return { args: ['prepare', f.directory], version: '0.1.5', config: f.config, log() {},
+    env: { GITHUB_SHA: f.metadata.sha, GITHUB_REF: 'refs/heads/main', GITHUB_RUN_NUMBER: '30',
+      GITHUB_RUN_ATTEMPT: '1', GITHUB_REPOSITORY: f.config.repository }, ...extra };
+}
+
+test('unsigned preparation removes a stale feed and returns bootstrap without a network call', t => {
+  const f = fixture(t, { signed: false });
+  writeFileSync(path.join(f.directory, 'latest.json'), '{"version":"stale"}');
+  const result = preparePublicUpdate({ ...f, run: '30', attempt: '1' });
+  assert.equal(result.signed, false);
+  assert.equal(existsSync(path.join(f.directory, 'latest.json')), false);
+  assert.equal(f.calls.length, 0);
+});
+
+test('a complete unsigned release still publishes installers and checksums without latest.json', t => {
+  const f = fixture(t, { signed: false });
+  preparePublicUpdate({ ...f, run: '30', attempt: '1' });
+  assert.equal(publishRelease({ directory: f.directory, metadata: f.metadata,
+    repository: f.config.repository, gh: f.gh }).existing, false);
+  const assets = f.releases.get(f.metadata.tag).assets.map(asset => asset.name);
+  for (const name of ['Setup-Windows.exe', 'Setup-Windows.msi', 'android.apk', 'SHA256SUMS.txt']) assert.ok(assets.includes(name));
+  assert.equal(assets.includes('latest.json'), false);
+  assert.equal(f.publish().signed, false);
+  assert.equal(f.releases.has('updates'), false);
+});
+
+test('unsigned input cannot demote, overwrite or delete an existing signed update channel', t => {
+  const f = fixture(t, { signed: false, oldVersion: '0.1.5+build.29.1' });
+  const previous = JSON.stringify(f.releases.get('updates'));
+  assert.equal(f.publish().signed, false);
+  assert.equal(JSON.stringify(f.releases.get('updates')), previous);
+});
+
+test('partial or broken signing fails the prepare step explicitly', t => {
+  const f = fixture(t);
+  rmSync(path.join(f.directory, 'android.apk.sig'));
+  assert.throws(() => preparePublicUpdate({ ...f, run: '30', attempt: '1' }), /Updater signatures are incomplete/);
+  writeFileSync(path.join(f.directory, 'orphan.exe.sig'), 'dummy');
+  assert.throws(() => preparePublicUpdate({ ...f, run: '30', attempt: '1' }), /no matching package/);
+  const unsigned = fixture(t, { signed: false });
+  assert.throws(() => preparePublicUpdate({ ...unsigned, run: '30', attempt: '1', requireSigned: true }),
+    /complete signed packages are missing/);
+});
+
+test('CLI prepare emits GitHub Actions outputs for signed and bootstrap modes', t => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'hermes-cli-output-'));
+  const output = path.join(dir, 'output.txt');
+  const f = fixture(t);
+  runPublicRelease(cliOptions(f, { env: { ...cliOptions(f).env, GITHUB_OUTPUT: output } }));
+  assert.match(readFileSync(output, 'utf8'), /signed=true\nmode=signed/);
+  const unsigned = fixture(t, { signed: false });
+  rmSync(output);
+  runPublicRelease(cliOptions(unsigned, { env: { ...cliOptions(unsigned).env, GITHUB_OUTPUT: output } }));
+  assert.match(readFileSync(output, 'utf8'), /signed=false\nmode=bootstrap/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('CLI promotion skips network mutation cleanly during bootstrap releases', t => {
+  const f = fixture(t, { signed: false });
+  const calls = [];
+  const result = runPublicRelease({
+    args: [f.directory], version: '0.1.5', config: f.config,
+    env: { GITHUB_SHA: f.metadata.sha, GITHUB_REF: 'refs/heads/main', GITHUB_RUN_NUMBER: '30',
+      GITHUB_RUN_ATTEMPT: '1', GITHUB_REPOSITORY: f.config.repository },
+    publish: () => { calls.push('publish'); return { signed: false }; },
+    log() {}
+  });
+  assert.equal(result.signed, false);
+  assert.equal(calls.length, 0);
 });

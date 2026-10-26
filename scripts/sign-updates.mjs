@@ -6,6 +6,9 @@ import { releaseMetadata } from './release.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 if (!process.env.TAURI_SIGNING_PRIVATE_KEY) {
+  if (process.env.HERMES_UPDATER_SIGNING_REQUIRED === 'true') {
+    throw new Error('Signing is required for this run, but TAURI_SIGNING_PRIVATE_KEY is unavailable in the build job.');
+  }
   console.log('Updater signing is not configured; publishing bootstrap installers without an update feed.');
   process.exit(0);
 }

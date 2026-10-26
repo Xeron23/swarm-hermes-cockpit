@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -43,22 +43,39 @@ export function selectReleaseToken(env, repository) {
   return token;
 }
 
-export function preparePublicUpdate({ directory, metadata, config, run, attempt }) {
+function updateInputs({ directory, requireSigned = false }) {
+  // prepareArtifacts still rejects missing platforms, empty files and partial signatures.
+  const orphan = readdirSync(directory).find(name => /\.(exe|msi|apk)\.sig$/i.test(name)
+    && !existsSync(path.join(directory, name.slice(0, -4))));
+  if (orphan) throw new Error(`Updater signature has no matching package: ${orphan}`);
   const files = prepareArtifacts(directory);
   const packages = files.filter(filename => /\.(exe|msi|apk)$/i.test(filename));
-  if (!packages.length || packages.some(filename => !files.includes(`${filename}.sig`))) {
-    throw new Error('Signed packages are required before preparing an update feed.');
+  const signed = packages.length > 0 && packages.every(filename => files.includes(`${filename}.sig`));
+  if (requireSigned && !signed) {
+    throw new Error('Signing was enabled for this run, but complete signed packages are missing.');
   }
-  const feed = createUpdateFeed({ files, metadata, repository: config.repository, run, attempt });
-  writeFileSync(path.join(directory, 'latest.json'), JSON.stringify(feed, null, 2) + '\n');
-  return feed;
+  return { files, signed };
 }
 
-export function publishPublicRelease({ directory, metadata, config, run, attempt, gh = args => spawnSync('gh', args, { encoding: 'utf8', env: { ...process.env, GH_TOKEN: selectReleaseToken(process.env, config.repository) } }) }) {
+export function preparePublicUpdate(options) {
+  const { directory, metadata, config, run, attempt } = options;
+  // Never let an old feed turn an unsigned version release into an advertised update.
+  const filename = path.join(directory, 'latest.json');
+  rmSync(filename, { force: true });
+  const { files, signed } = updateInputs(options);
+  if (!signed) return { signed: false, reason: 'signing_not_configured' };
+  const feed = createUpdateFeed({ files, metadata, repository: config.repository, run, attempt });
+  writeFileSync(filename, JSON.stringify(feed, null, 2) + '\n');
+  return { signed: true, feed };
+}
+
+export function publishPublicRelease({ directory, metadata, config, run, attempt, requireSigned = false, gh = args => spawnSync('gh', args, { encoding: 'utf8', env: { ...process.env, GH_TOKEN: selectReleaseToken(process.env, config.repository) } }) }) {
   const repository = config.repository;
   if (!/^[\w.-]+\/[\w.-]+$/.test(repository) || config.channelTag !== 'updates') throw new Error('Invalid public updater repository/channel');
-  let files = prepareArtifacts(directory);
-  const signed = files.some(filename => filename.endsWith('.sig'));
+  const inputs = updateInputs({ directory, requireSigned });
+  let files = inputs.files;
+  const signed = inputs.signed;
+  if (!signed) return { signed: false };
   let feed = signed ? createUpdateFeed({ files, metadata, repository, run, attempt }) : null;
   const invoke = args => {
     const result = gh(args);
@@ -131,12 +148,19 @@ export function runPublicRelease({ args = process.argv.slice(2), env = process.e
   const options = {
     directory: args[preparing ? 1 : 0] || 'release-assets',
     metadata: releaseMetadata(env, version), config,
-    run: env.GITHUB_RUN_NUMBER, attempt: env.GITHUB_RUN_ATTEMPT
+    run: env.GITHUB_RUN_NUMBER, attempt: env.GITHUB_RUN_ATTEMPT,
+    requireSigned: env.HERMES_UPDATER_SIGNING_REQUIRED === 'true'
   };
   if (preparing) {
     const result = prepare(options);
-    log('Prepared signed latest.json before version release publication.');
+    if (env.GITHUB_OUTPUT) appendFileSync(env.GITHUB_OUTPUT, `signed=${result.signed}\nmode=${result.signed ? 'signed' : 'bootstrap'}\n`);
+    log(result.signed ? 'Prepared signed latest.json before version release publication.'
+      : 'Bootstrap release: no updater signatures; installer publication continues without a feed.');
     return result;
+  }
+  if (!updateInputs(options).signed) {
+    log('Bootstrap release: update channel promotion skipped; existing channel is unchanged.');
+    return { signed: false };
   }
   const token = selectReleaseToken(env, config.repository);
   const gh = args => spawnSync('gh', args, { encoding: 'utf8', env: { ...env, GH_TOKEN: token } });

@@ -16,12 +16,8 @@ if (!existsSync(filename)) {
 chmodSync(filename, 0o600);
 if (!existsSync(`${filename}.pub`)) throw new Error('Existing key has no public key file; refusing to replace it.');
 const publicKey = readFileSync(`${filename}.pub`, 'utf8').trim();
-const config = {
-  repository: 'Xeron23/hermes-cockpit-releases',
-  channelTag: 'updates',
-  publicKey,
-  endpoints: ['https://github.com/Xeron23/hermes-cockpit-releases/releases/download/updates/latest.json']
-};
+const configPath = path.join(root, 'src-tauri/updater.json');
+const config = { ...JSON.parse(readFileSync(configPath, 'utf8')), publicKey };
 writeFileSync(path.join(root, 'src-tauri/updater.json'), JSON.stringify(config, null, 2) + '\n');
 const tauriPath = path.join(root, 'src-tauri/tauri.conf.json');
 const tauri = JSON.parse(readFileSync(tauriPath, 'utf8'));

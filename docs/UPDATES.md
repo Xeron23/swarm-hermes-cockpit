@@ -4,13 +4,18 @@ The client checks at startup, every six hours, and after returning online. Open 
 
 One-time distribution setup
 
-1. Create **Xeron23/hermes-cockpit-releases** as a **public** repository, initialized with a README. It contains public installers, APKs, signatures, checksums, and update metadata. Source remains in the private `swarm-cockpit-desktop` repository.
-2. In the private source repository's **Settings → Secrets and variables → Actions**, add:
-   - `TAURI_SIGNING_PRIVATE_KEY`: the **contents** of the existing updater private key. This workspace's generated key is `/workspace/hermes-updater-secrets/tauri-updater.key`, outside the checkout, with mode 0600. Its matching public key is already committed in `src-tauri/updater.json` and `src-tauri/tauri.conf.json`. The key has an empty password. Keep a secure personal backup; do not regenerate it for each release or commit it.
-   - `PUBLIC_RELEASE_TOKEN`: a fine-grained GitHub token restricted to **hermes-cockpit-releases**, with **Contents: Read and write**. If the owner is an organization, complete its token authorization. The app never receives this token.
-3. Run **Build and release Windows & Android** from Actions, or push a new commit to `main`. Install the first version containing the updater manually once. Following signed releases appear inside the app.
+Distribution uses the same repository (`Xeron23/swarm-hermes-cockpit`) by default, using Actions' `GITHUB_TOKEN` with write permissions. A separate public mirror repository is no longer required unless desired.
 
-This workspace can push Git commits, but its GitHub API authentication is unavailable. Creating the public repository and setting Actions secrets must be done with the repository owner's GitHub access. Until configured, private builds continue as bootstrap installers. The client reports that the update feed is unavailable; it does not accept unsigned updates.
+Release Modes (Bootstrap vs Signed)
+1. **Bootstrap Mode (Default)**:
+   - When `TAURI_SIGNING_PRIVATE_KEY` is not configured in Actions secrets, releases continue normally as bootstrap releases.
+   - Installers (`.exe`, `.msi`, `.apk`) are published to the version release draft and published publicly.
+   - Update channel promotion (`latest.json`) is skipped. In-app updater reports that updates are not yet available on the release service without dropping user sessions.
+
+2. **Signed Mode**:
+   - To enable in-app auto-updates, add `TAURI_SIGNING_PRIVATE_KEY` in **Settings → Secrets and variables → Actions**.
+   - If using a public repository, also add `ANDROID_DEBUG_KEYSTORE_BASE64` (`base64 -w 0 ~/.android/debug.keystore`).
+   - Releases will generate, sign, and promote `latest.json` to the `updates` tag.
 
 Publication and signing
 

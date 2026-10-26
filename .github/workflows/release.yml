@@ -24,12 +24,29 @@ jobs:
     timeout-minutes: 15
     outputs:
       tag: ${{ steps.release.outputs.tag }}
+      updater_signing: ${{ steps.signing.outputs.enabled }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+      - name: Plan optional updater signing
+        id: signing
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          ANDROID_DEBUG_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
+          SOURCE_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          node --input-type=module <<'JS'
+          import { appendFileSync } from 'node:fs';
+          const enabled = Boolean(process.env.TAURI_SIGNING_PRIVATE_KEY);
+          if (enabled && process.env.SOURCE_PRIVATE === 'false' && !process.env.ANDROID_DEBUG_KEYSTORE_BASE64) {
+            throw new Error('Signed updates from a public source require the existing Android keystore in ANDROID_DEBUG_KEYSTORE_BASE64.');
+          }
+          appendFileSync(process.env.GITHUB_OUTPUT, `enabled=${enabled}\n`);
+          console.log(enabled ? 'Release mode: signed updater' : 'Release mode: bootstrap installers (updater signing not configured)');
+          JS
       - run: npm ci
       - run: npm run check && npm test && npm run web:build
       - uses: dtolnay/rust-toolchain@stable
@@ -92,6 +109,8 @@ jobs:
         run: node scripts/sign-updates.mjs release-assets
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          HERMES_UPDATER_SIGNING_REQUIRED: ${{ needs.validate.outputs.updater_signing }}
       - uses: actions/upload-artifact@v4
         with:
           name: release-windows
@@ -139,6 +158,7 @@ jobs:
           workspaces: src-tauri -> target
           key: android-aarch64
       - name: Reuse debug signing identity when cached
+        if: ${{ needs.validate.outputs.updater_signing != 'true' || github.event.repository.private }}
         uses: actions/cache@v4
         with:
           path: ~/.android/debug.keystore
@@ -146,7 +166,25 @@ jobs:
       - run: npm ci
       - name: Generate Android project
         run: npx tauri android init --ci --skip-targets-install
+      - name: Restore Android signing identity for public signed releases
+        if: ${{ needs.validate.outputs.updater_signing == 'true' && github.event.repository.private == false }}
+        env:
+          ANDROID_DEBUG_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          python3 - <<'PY'
+          import base64, os
+          from pathlib import Path
+          data = base64.b64decode(os.environ['ANDROID_DEBUG_KEYSTORE_BASE64'], validate=True)
+          if not data:
+              raise SystemExit('Android signing identity is empty.')
+          destination = Path.home() / '.android' / 'debug.keystore'
+          destination.parent.mkdir(parents=True, exist_ok=True)
+          destination.write_bytes(data)
+          destination.chmod(0o600)
+          PY
+          keytool -list -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey > /dev/null
       - name: Restore durable Android signing identity
+        if: ${{ needs.validate.outputs.updater_signing == 'true' && github.event.repository.private }}
         run: node scripts/android-signing.mjs restore
         env:
           GH_TOKEN: ${{ github.token }}
@@ -179,6 +217,7 @@ jobs:
             "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --verbose "$apk"
           done
       - name: Preserve Android signing identity privately
+        if: ${{ needs.validate.outputs.updater_signing == 'true' && github.event.repository.private }}
         run: node scripts/android-signing.mjs save
         env:
           GH_TOKEN: ${{ github.token }}
@@ -187,6 +226,8 @@ jobs:
         run: node scripts/sign-updates.mjs release-assets
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          HERMES_UPDATER_SIGNING_REQUIRED: ${{ needs.validate.outputs.updater_signing }}
       - uses: actions/upload-artifact@v4
         with:
           name: release-android
@@ -217,17 +258,32 @@ jobs:
           path: release-assets
           merge-multiple: true
       - run: npm ci
-      - name: Prepare signed feed before publishing the version release
+      - name: Prepare optional signed feed before publishing the version release
+        id: feed
         run: node scripts/publish-public.mjs prepare release-assets
+        env:
+          HERMES_UPDATER_SIGNING_REQUIRED: ${{ needs.validate.outputs.updater_signing }}
       - name: Publish only after all platform assets are ready
         run: node scripts/release.mjs publish release-assets
         env:
           GH_TOKEN: ${{ github.token }}
       - name: Promote the same-repository update channel
+        if: ${{ steps.feed.outputs.signed == 'true' }}
         run: node scripts/publish-public.mjs release-assets
         env:
           GH_TOKEN: ${{ github.token }}
+          HERMES_UPDATER_SIGNING_REQUIRED: ${{ needs.validate.outputs.updater_signing }}
       - name: Verify anonymous public update feed
+        if: ${{ steps.feed.outputs.signed == 'true' }}
         run: |
           curl --fail --location --retry 3 --retry-all-errors --retry-delay 5 --output public-latest.json https://github.com/Xeron23/swarm-hermes-cockpit/releases/download/updates/latest.json
           node -e "const f = require('./public-latest.json'); if (!f.version || !f.platforms?.['windows-x86_64'] || !f.platforms?.['android-aarch64']) throw new Error('Incomplete public update feed')"
+      - name: Summarize release mode
+        env:
+          UPDATE_SIGNED: ${{ steps.feed.outputs.signed }}
+        run: |
+          if [ "$UPDATE_SIGNED" = "true" ]; then
+            echo 'Release published with signed in-app updater metadata.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Bootstrap installers published. Signing is not configured; update feed generation, promotion and anonymous feed verification were skipped. Any existing signed channel is unchanged.' >> "$GITHUB_STEP_SUMMARY"
+          fi
